@@ -10,3 +10,6 @@ mse:2.301942825317383, mae:1.0656776428222656, rmse:1.5172154903411865, mape:4.5
 long_term_forecast_Traffic_2021_24_12_fullLLM_0_TimeLLM_custom_ftS_sl24_ll12_pl12_dm768_nh1_el2_dl1_df2048_expand2_dc4_fc1_ebtimeF_dtTrue_Exp_0_mixtype_2_layer_num_1  
 mse:0.2223237305879593, mae:0.2731025516986847, rmse:0.47151216864585876, mape:0.30329248309135437, mspe:0.5709888935089111
 
+long_term_forecast_Algriculture_2021_24_6_fullLLM_0_TimeXer_custom_ftS_sl24_ll12_pl6_dm768_nh1_el2_dl1_df2048_expand2_dc4_fc1_ebtimeF_dtTrue_Exp_0_mixtype_2_layer_num_1_shared_router_0_shared_experts_0  
+mse:0.07614465802907944, mae:0.20090167224407196, rmse:0.27594321966171265, mape:0.09192343801259995, mspe:0.015001143328845501
+

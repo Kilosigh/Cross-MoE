@@ -8,9 +8,12 @@
 #   ./run_all_ca.sh 6 6 0 $i 4
 # done
 
-for i in {4..6}
+for i in {1..4}
 do
-  # echo "当前数字是: $i"
-  # ./run_baseline.sh 6 6 1 $i 2
-  ./run_w_o_text_2.sh $i $i 0
+  ./mix_type_2/run_all_10.sh 6 6 0 $((4*i))
+done
+
+for i in {1..4}
+do
+  ./mix_type_2/run_all_11.sh 6 6 0 $((4*i))
 done

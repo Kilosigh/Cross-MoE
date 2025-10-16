@@ -60,14 +60,14 @@ do
           --text_len 4 \
           --prompt_weight 0.1 \
           --pool_type "avg" \
-          --save_name "result_health_bert1" \
+          --save_name "result_health_bert3" \
           --llm_model BERT \
           --huggingface_token 'NA'\
           --use_fullmodel $use_fullmodel \
           --freq ${freq_array[$i]} \
           --use_tx_moe 1 \
           --use_ts_moe 0 \
-          --num_tx_experts 4 \
+          --num_tx_experts $4 \
           --num_ts_experts 0 \
           --num_tx_moe_layers 1 \
           --num_ts_moe_layers 0 \
@@ -82,7 +82,7 @@ do
           --plot_tsne 0 \
           --use_k_means_init 0 \
           --plot_attn 1 \
-          --shared_router 0 \
+          --shared_router 1 \
           --shared_experts 0 \
       done
     done

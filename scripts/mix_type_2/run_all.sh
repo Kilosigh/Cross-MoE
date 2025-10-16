@@ -67,7 +67,7 @@ do
           --freq ${freq_array[$i]} \
           --use_tx_moe 1 \
           --use_ts_moe 0 \
-          --num_tx_experts 4 \
+          --num_tx_experts $4 \
           --num_ts_experts 0 \
           --num_tx_moe_layers 1 \
           --num_ts_moe_layers 0 \
