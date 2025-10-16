@@ -8,6 +8,7 @@ from sklearn.manifold import TSNE  # 添加t-SNE库
 import seaborn as sns  # 用于美化图表
 import os
 from visualization.tSNE import TSNEVisualizer
+from visualization.attn_heat_map import AttentionHeatmapVisualizer
 from typing import Dict, Optional
 import time
 
@@ -142,28 +143,258 @@ class AttentionStatistics:
                     print(f"  Average {category} time: {value:.2f} ms")
         print("="*60 + "\n")
 
+class ClusterTokenStatistics:
+    """簇内Token统计类"""
+    
+    def __init__(self, num_clusters: int):
+        self.num_clusters = num_clusters
+        self.reset()
+    
+    def reset(self):
+        """重置统计数据"""
+        self.batch_stats = []  # 存储每个batch的统计
+        self.total_batches = 0
+        
+    def update(self, assignments: torch.Tensor, seq_len_q: int, seq_len_k: int):
+        """
+        更新单个batch的统计
+        
+        Args:
+            assignments: [batch_size, seq_len_q + seq_len_k] 簇分配
+            seq_len_q: 查询序列长度
+            seq_len_k: 键序列长度
+        """
+        batch_size = assignments.shape[0]
+        
+        # 分离Q和K的分配
+        query_assignments = assignments[:, :seq_len_q]  # [batch_size, seq_len_q]
+        key_assignments = assignments[:, seq_len_q:seq_len_q + seq_len_k]  # [batch_size, seq_len_k]
+        
+        # 统计每个batch中每个簇的Q和K token数量
+        batch_cluster_stats = []
+        
+        for b in range(batch_size):
+            cluster_info = {}
+            for m in range(self.num_clusters):
+                q_count = (query_assignments[b] == m).sum().item()
+                k_count = (key_assignments[b] == m).sum().item()
+                cluster_info[m] = {
+                    'q_tokens': q_count,
+                    'k_tokens': k_count,
+                    'total_tokens': q_count + k_count,
+                    'q_ratio': q_count / seq_len_q if seq_len_q > 0 else 0,
+                    'k_ratio': k_count / seq_len_k if seq_len_k > 0 else 0
+                }
+            batch_cluster_stats.append(cluster_info)
+        
+        self.batch_stats.append({
+            'batch_size': batch_size,
+            'seq_len_q': seq_len_q,
+            'seq_len_k': seq_len_k,
+            'cluster_stats': batch_cluster_stats,
+            'timestamp': time.time()
+        })
+        self.total_batches += 1
+        
+        return batch_cluster_stats
+    
+    def get_current_batch_summary(self) -> Dict:
+        """获取当前batch的统计摘要"""
+        if not self.batch_stats:
+            return {}
+        
+        latest = self.batch_stats[-1]
+        summary = {
+            'batch_index': self.total_batches - 1,
+            'batch_size': latest['batch_size'],
+            'seq_len_q': latest['seq_len_q'],
+            'seq_len_k': latest['seq_len_k'],
+            'clusters': {}
+        }
+        
+        # 计算整个batch的平均值
+        for m in range(self.num_clusters):
+            q_tokens_list = [batch[m]['q_tokens'] for batch in latest['cluster_stats']]
+            k_tokens_list = [batch[m]['k_tokens'] for batch in latest['cluster_stats']]
+            
+            summary['clusters'][f'cluster_{m}'] = {
+                'avg_q_tokens': np.mean(q_tokens_list),
+                'avg_k_tokens': np.mean(k_tokens_list),
+                'total_q_tokens': sum(q_tokens_list),
+                'total_k_tokens': sum(k_tokens_list),
+                'min_q_tokens': min(q_tokens_list),
+                'max_q_tokens': max(q_tokens_list),
+                'min_k_tokens': min(k_tokens_list),
+                'max_k_tokens': max(k_tokens_list),
+                'active_samples': sum(1 for q, k in zip(q_tokens_list, k_tokens_list) if q > 0 or k > 0)
+            }
+        
+        return summary
+    
+    def get_global_summary(self) -> Dict:
+        """获取所有batch的全局统计摘要"""
+        if not self.batch_stats:
+            return {}
+        
+        global_summary = {
+            'total_batches': self.total_batches,
+            'clusters': {}
+        }
+        
+        # 收集所有batch的数据
+        for m in range(self.num_clusters):
+            all_q_tokens = []
+            all_k_tokens = []
+            
+            for batch_data in self.batch_stats:
+                for sample_stats in batch_data['cluster_stats']:
+                    all_q_tokens.append(sample_stats[m]['q_tokens'])
+                    all_k_tokens.append(sample_stats[m]['k_tokens'])
+            
+            global_summary['clusters'][f'cluster_{m}'] = {
+                'total_q_tokens': sum(all_q_tokens),
+                'total_k_tokens': sum(all_k_tokens),
+                'avg_q_tokens_per_sample': np.mean(all_q_tokens) if all_q_tokens else 0,
+                'avg_k_tokens_per_sample': np.mean(all_k_tokens) if all_k_tokens else 0,
+                'std_q_tokens': np.std(all_q_tokens) if all_q_tokens else 0,
+                'std_k_tokens': np.std(all_k_tokens) if all_k_tokens else 0,
+                'utilization_rate': sum(1 for q, k in zip(all_q_tokens, all_k_tokens) if q > 0 or k > 0) / len(all_q_tokens) if all_q_tokens else 0
+            }
+        
+        return global_summary
+    
+    def print_batch_distribution(self, batch_idx: int = -1):
+        """打印指定batch的token分布"""
+        if not self.batch_stats:
+            print("No statistics available.")
+            return
+        
+        batch_data = self.batch_stats[batch_idx]
+        print("\n" + "="*80)
+        print(f"BATCH {self.total_batches + batch_idx if batch_idx < 0 else batch_idx} TOKEN DISTRIBUTION")
+        print("="*80)
+        print(f"Batch Size: {batch_data['batch_size']}, Seq Len Q: {batch_data['seq_len_q']}, Seq Len K: {batch_data['seq_len_k']}")
+        print("-"*80)
+        
+        # 打印每个样本的详细分布
+        for sample_idx, sample_stats in enumerate(batch_data['cluster_stats']):
+            print(f"\nSample {sample_idx}:")
+            print(f"{'Cluster':<10} {'Q Tokens':<12} {'K Tokens':<12} {'Total':<10} {'Q Ratio':<10} {'K Ratio':<10}")
+            print("-"*70)
+            
+            for m in range(self.num_clusters):
+                stats = sample_stats[m]
+                if stats['total_tokens'] > 0:  # 只打印非空簇
+                    print(f"Cluster {m:<3} {stats['q_tokens']:<12} {stats['k_tokens']:<12} "
+                          f"{stats['total_tokens']:<10} {stats['q_ratio']:<10.2%} {stats['k_ratio']:<10.2%}")
+        
+        # 打印batch摘要
+        summary = self.get_current_batch_summary()
+        print("\n" + "-"*80)
+        print("BATCH SUMMARY:")
+        print(f"{'Cluster':<10} {'Avg Q':<10} {'Avg K':<10} {'Total Q':<10} {'Total K':<10} {'Active':<10}")
+        print("-"*70)
+        
+        for m in range(self.num_clusters):
+            cluster_stats = summary['clusters'][f'cluster_{m}']
+            print(f"Cluster {m:<3} {cluster_stats['avg_q_tokens']:<10.1f} {cluster_stats['avg_k_tokens']:<10.1f} "
+                  f"{cluster_stats['total_q_tokens']:<10} {cluster_stats['total_k_tokens']:<10} "
+                  f"{cluster_stats['active_samples']:<10}")
+        
+        print("="*80 + "\n")
+    
+    def plot_distribution(self, save_path: Optional[str] = None):
+        """绘制token分布图"""
+        if not self.batch_stats:
+            print("No statistics available for plotting.")
+            return
+        
+        latest = self.batch_stats[-1]
+        
+        # 准备数据
+        cluster_ids = list(range(self.num_clusters))
+        avg_q_tokens = []
+        avg_k_tokens = []
+        
+        for m in cluster_ids:
+            q_tokens = [batch[m]['q_tokens'] for batch in latest['cluster_stats']]
+            k_tokens = [batch[m]['k_tokens'] for batch in latest['cluster_stats']]
+            avg_q_tokens.append(np.mean(q_tokens))
+            avg_k_tokens.append(np.mean(k_tokens))
+        
+        # 创建图表
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # 柱状图
+        x = np.arange(len(cluster_ids))
+        width = 0.35
+        
+        bars1 = ax1.bar(x - width/2, avg_q_tokens, width, label='Q Tokens', alpha=0.8)
+        bars2 = ax1.bar(x + width/2, avg_k_tokens, width, label='K Tokens', alpha=0.8)
+        
+        ax1.set_xlabel('Cluster ID')
+        ax1.set_ylabel('Average Token Count')
+        ax1.set_title('Average Token Distribution per Cluster')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(cluster_ids)
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # 添加数值标签
+        for bar in bars1:
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}', ha='center', va='bottom', fontsize=8)
+        for bar in bars2:
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}', ha='center', va='bottom', fontsize=8)
+        
+        # 饼图 - 显示总token分布
+        total_tokens = [q + k for q, k in zip(avg_q_tokens, avg_k_tokens)]
+        non_zero_clusters = [(i, t) for i, t in enumerate(total_tokens) if t > 0]
+        
+        if non_zero_clusters:
+            labels = [f'Cluster {i}' for i, _ in non_zero_clusters]
+            sizes = [t for _, t in non_zero_clusters]
+            
+            ax2.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+            ax2.set_title('Total Token Distribution Across Clusters')
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=100, bbox_inches='tight')
+            print(f"Distribution plot saved to {save_path}")
+        else:
+            plt.show()
+        
+        plt.close()
+
+
 class MoEClusteredAttention(nn.Module):
     def __init__(self, configs, d_model, num_clusters, update_weight, 
                  init_data=None, expert_hidden_dim=None, 
                  kmeans_n_init=10, kmeans_max_iter=300,
-                 use_trainable_center=False):
+                 use_trainable_center=False, enable_token_stats=True):
         """
         Args:
             use_trainable_center (bool): 
                 True - 使用可训练的簇核心（通过梯度更新）
                 False - 使用EMA更新（冻结梯度）
+                enable_token_stats (bool): 是否启用token统计功能
         """
         super().__init__()
         self.configs = configs
+        self.plot_attn = configs.plot_attn
+        self.plot_tsne = configs.plot_tsne  # 保存绘图标志
+        self.tsne_path = None
+
         self.d_model = d_model
         self.M = num_clusters
         self.lambda_ = update_weight
         self.use_trainable_center = use_trainable_center
-        self.plot_tsne = configs.plot_tsne  # 保存绘图标志
-
-        self.tsne_path = None
             
-        
         # 根据配置选择簇核心初始化方式
         if use_trainable_center:
             # 作为可训练参数
@@ -172,13 +403,11 @@ class MoEClusteredAttention(nn.Module):
             # 作为缓冲区（不可训练）
             self.register_buffer('miu', torch.empty(num_clusters, d_model))
         
-        # 使用k-means初始化聚类中心
-        print(f"use_k_means_init:{configs.use_k_means_init}")
-        if init_data is not None:
-            self._init_with_kmeans(init_data, n_init=kmeans_n_init, max_iter=kmeans_max_iter)
-        else:
-            nn.init.normal_(self.miu, mean=0.0, std=0.02)
-        
+        self.enable_token_stats = enable_token_stats
+        if enable_token_stats:
+            self.token_stats = ClusterTokenStatistics(num_clusters)
+            print(f"  - Token统计: 已启用")
+            
         # 设置专家网络隐藏层维度
         expert_hidden_dim = expert_hidden_dim or 4 * d_model
         
@@ -202,6 +431,15 @@ class MoEClusteredAttention(nn.Module):
             ) for _ in range(num_clusters)
         ])
         
+        if not self.configs.is_training:
+            return 
+        # 使用k-means初始化聚类中心
+        print(f"use_k_means_init:{configs.use_k_means_init}")
+        if init_data is not None:
+            self._init_with_kmeans(init_data, n_init=kmeans_n_init, max_iter=kmeans_max_iter)
+        else:
+            nn.init.normal_(self.miu, mean=0.0, std=0.02)
+
         # 打印配置信息
         print(f"初始化MoE-Enhanced Clustered Attention:")
         print(f"  - 簇核心更新方式: {'可训练参数' if use_trainable_center else 'EMA更新'}")
@@ -386,7 +624,97 @@ class MoEClusteredAttention(nn.Module):
             filename=file_name
         )
 
-    def forward(self, Q, K, V):
+    def f_plot_attn(self, attention_weights, idx):
+        folder_path = './attn_results/MoE_attn/'
+        folder_path  += f"num_centers:{self.configs.num_tx_experts}/"
+
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+
+        folder_path +=  f"{self.configs.model_id}_b_out_idx:{idx}"
+
+        attn_visualizer = AttentionHeatmapVisualizer(self.configs)
+
+        k_len = attention_weights.shape[-1]
+        plot_attn = attention_weights.reshape(-1, k_len)
+        plot_full_path = folder_path
+        fig1 = attn_visualizer.plot_attention(
+                plot_attn,
+                title=f"Attention Heatmap ({plot_attn.shape[0]}x{plot_attn.shape[1]})",
+                colormap='cool',
+                save_path=plot_full_path,
+                show_values=True,
+                grid=True,
+            )
+        
+        plt.close(fig1)
+        
+    def generate_clustered_attention(self, Q_prime, K_prime, V, assignments):
+        """
+        生成基于聚类的稀疏注意力
+        
+        Args:
+            Q_prime: 变换后的查询 [batch_size, seq_len_q, d_model]
+            K_prime: 变换后的键 [batch_size, seq_len_k, d_model]
+            V: 值矩阵 [batch_size, seq_len_k, d_model]
+            assignments: 专家分配 [batch_size, seq_len_q + seq_len_k]
+            M: 簇的数量
+        
+        Returns:
+            attention_output: 注意力输出 [batch_size, seq_len_q, d_model]
+            attention_weights: 注意力权重 [batch_size, seq_len_q, seq_len_k]
+        """
+        batch_size, seq_len_q, d_model = Q_prime.shape
+        _, seq_len_k, _ = K_prime.shape
+        device = Q_prime.device
+        M = self.M
+        
+        # 初始化输出和注意力权重存储
+        attention_output = torch.zeros_like(Q_prime)
+        attention_weights = torch.zeros(batch_size, seq_len_q, seq_len_k, device=device)
+        
+        # 获取查询和键的簇分配
+        query_assignments = assignments[:, :seq_len_q]  # [batch_size, seq_len_q]
+        key_assignments = assignments[:, seq_len_q:]    # [batch_size, seq_len_k]
+        
+        # 方法1: 批量计算(更高效)
+        for m in range(M):
+            # 找出属于簇m的查询和键的mask
+            query_mask = (query_assignments == m)  # [batch_size, seq_len_q]
+            key_mask = (key_assignments == m)      # [batch_size, seq_len_k]
+            
+            for b in range(batch_size):
+                q_indices = query_mask[b].nonzero(as_tuple=True)[0]
+                k_indices = key_mask[b].nonzero(as_tuple=True)[0]
+                
+                if len(q_indices) == 0 or len(k_indices) == 0:
+                    continue
+                
+                # 提取簇内的Q, K, V
+                Q_cluster = Q_prime[b, q_indices]  # [num_q, d_model]
+                K_cluster = K_prime[b, k_indices]  # [num_k, d_model]
+                V_cluster = V[b, k_indices]        # [num_k, d_model]
+                
+                # 计算簇内注意力分数
+                attn_scores = torch.matmul(Q_cluster, K_cluster.T) / (d_model ** 0.5)  # [num_q, num_k]
+                attn_probs = F.softmax(attn_scores, dim=-1)  # [num_q, num_k]
+                
+                # 计算注意力输出
+                cluster_output = torch.matmul(attn_probs, V_cluster)  # [num_q, d_model]
+                
+                # 将结果写回对应位置
+                attention_output[b, q_indices] = cluster_output
+                
+                # 将注意力权重填入完整的权重矩阵
+                # 使用高级索引将簇内的注意力权重填入对应位置
+                attention_weights[b, q_indices[:, None], k_indices[None, :]] = attn_probs
+
+
+        attention_weights = attention_weights.detach().cpu().numpy()
+                
+        return attention_output, attention_weights
+
+    def forward(self, Q, K, V, idx):
         batch_size, seq_len_q, d = Q.shape
         _, seq_len_k, _ = K.shape
         device = Q.device
@@ -412,6 +740,27 @@ class MoEClusteredAttention(nn.Module):
         # 3. 确定专家分配
         assignments = torch.argmax(scores, dim=-1)  # [batch_size, 2*seq_len]
         
+        # 检查和分析分簇结果 (只在训练时或需要调试时启用)
+        # 条件可以根据需要修改，例如 if self.configs.is_testing:
+        if self.training and self.enable_token_stats:
+            # 步骤 A: 更新当前批次的统计数据
+            self.token_stats.update(assignments, seq_len_q, seq_len_k)
+            
+            # 步骤 B: 在控制台打印详细的分布表格
+            # 为了避免刷屏，可以设置一个条件，比如每隔50个batch打印一次
+            if idx % 50 == 0: 
+                print(f"--- [Batch Index: {idx}] - Cluster Assignment Analysis ---")
+                self.token_stats.print_batch_distribution()
+
+            # 步骤 C (可选): 绘制并保存分布图
+            # 这会生成图片，通常用于更深入的分析，而不是每个batch都调用
+            # if idx % 200 == 0:
+            #     save_path = f"./cluster_plots/batch_{idx}_distribution.png"
+            #     os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            #     self.token_stats.plot_distribution(save_path=save_path)
+
+        # --- 核查代码结束 ---
+        
         # 4. 应用专家变换
         x_transformed = torch.zeros_like(x)
         
@@ -425,57 +774,21 @@ class MoEClusteredAttention(nn.Module):
         
         # 处理键向量 (后seq_len个)
         for m in range(self.M):
-            mask = (assignments == m) & (torch.arange(seq_len_q + seq_len_k, device=device) >= seq_len_k)
+            mask = (assignments == m) & (torch.arange(seq_len_q + seq_len_k, device=device) >= seq_len_q)
             for b in torch.where(mask.any(dim=1))[0]:
                 indices = mask[b].nonzero(as_tuple=True)[0]
                 x_transformed[b, indices] = self.experts_K[m](x[b, indices])
         
         # 分离变换后的Q'和K'
         Q_prime = x_transformed[:, :seq_len_q]
-        K_prime = x_transformed[:, seq_len_k:]
+        K_prime = x_transformed[:, seq_len_q:]
         V = K_prime
         
-        # 5. 聚类注意力计算
-        O = torch.zeros_like(Q)
-        
-        # 预计算簇内键值
-        cluster_keys = {}
-        cluster_values = {}
-        for m in range(self.M):
-            # 找出属于当前簇的所有键/值
-            mask = assignments[:, seq_len_k:] == m
-            if not mask.any():
-                continue
-                
-            # 收集所有批次的簇内键值
-            keys = []
-            values = []
-            for b in range(batch_size):
-                if mask[b].any():
-                    keys.append(K_prime[b, mask[b]])
-                    values.append(V[b, mask[b]])
-            cluster_keys[m] = keys
-            cluster_values[m] = values
-        
-        # 为每个查询计算注意力
-        for b in range(batch_size):
-            for i in range(seq_len_q):
-                m_i = assignments[b, i].item()
-                
-                # 检查簇是否存在且包含当前批次的数据
-                if m_i not in cluster_keys or not cluster_keys[m_i] or b >= len(cluster_keys[m_i]):
-                    # Fallback: 使用全局平均
-                    O[b, i] = V[b].mean(dim=0)
-                    continue
-                
-                # 获取当前批次的簇内键值
-                K_m = cluster_keys[m_i][b]  # [num_keys, d]
-                V_m = cluster_values[m_i][b]  # [num_keys, d]
-                
-                # 计算注意力
-                attn_scores = torch.matmul(Q_prime[b, i], K_m.T) / (d ** 0.5)
-                attn_weights = F.softmax(attn_scores, dim=-1)
-                O[b, i] = torch.matmul(attn_weights, V_m)
+        O, attention_weights = self.generate_clustered_attention(Q_prime, K_prime, V, assignments)
+
+        if self.plot_attn and self.configs.is_testing:
+            self.f_plot_attn(attention_weights, idx)
+
         
         # 6. 簇核心更新策略
         if self.training and not self.use_trainable_center:
@@ -500,8 +813,10 @@ class MoEClusteredAttention(nn.Module):
             
             # 无梯度更新
             self.miu.copy_(new_miu)
+
+            
         
-        return O+Q
+        return O+Q, 0
 
     def get_stats_summary(self):
         """获取统计摘要"""

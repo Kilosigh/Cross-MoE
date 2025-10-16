@@ -715,6 +715,7 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
                         # 添加到当前batch的单词列表
                         ranked_text.extend(selected_tokens)
 
+
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 
@@ -755,6 +756,9 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
                     pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
                     visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
 
+        if self.args.mix_type == 2:
+            self.model.mixer.moe_enhanced_cross.finalize_statistics(self.args.model_id)
+            
         if len(preds[-1]) != len(preds[0]):  # 以第一个为基准
             preds = preds[:-1]  # 去掉最后一个
             trues = trues[:-1]  # 同步去掉

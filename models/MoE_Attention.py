@@ -12,38 +12,44 @@ from visualization.attn_heat_map import AttentionHeatmapVisualizer
 from typing import Dict, Optional
 import time
 
+import json
+import torch
+from typing import Dict
+from pathlib import Path
+
 class AttentionStatistics:
-    """轻量级注意力统计类，可集成到MoEClusteredAttention中"""
+    """集成在MoE-ATTN网络模块中的FLOPs统计类"""
     
-    def __init__(self, enabled: bool = True):
+    def __init__(self, output_dir: str = "./moe_attn_stats", enabled: bool = True):
         self.enabled = enabled
+        self.output_dir = Path(output_dir)
+        self.output_dir_batch = self.output_dir / "batch_wise_info/"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir_batch.mkdir(parents=True, exist_ok=True)
+        
+        # 重置统计
         self.reset_stats()
     
     def reset_stats(self):
-        """重置统计数据"""
+        """重置所有统计"""
         self.stats = {
             'total_batches': 0,
             'total_qk_flops': 0,
             'total_native_flops': 0,
             'total_connections': 0,
             'total_theoretical_connections': 0,
-            'avg_sparsity': 0,
-            'cluster_utilization': [],
-            'time_measurements': {
-                'routing': [],
-                'expert_forward': [],
-                'attention': []
-            }
+            'batch_details': []  # 存储每个batch的详细信息
         }
     
-    def update_qk_stats(self, 
+    def update_qk_stats(self,
+                       batch_id: int,
                        batch_size: int,
                        seq_len_q: int,
                        seq_len_k: int,
                        d_model: int,
                        assignments: torch.Tensor,
                        M: int):
-        """更新QK计算统计"""
+        """更新QK计算统计并保存当前batch信息"""
         if not self.enabled:
             return
         
@@ -53,7 +59,7 @@ class AttentionStatistics:
         # 计算MoE QK FLOPs
         moe_flops = 0
         connections = 0
-        cluster_sizes = []
+        active_clusters = 0
         
         for b in range(batch_size):
             for m in range(M):
@@ -64,56 +70,102 @@ class AttentionStatistics:
                     # QK^T的FLOPs: q_count * k_count * (2 * d_model - 1)
                     moe_flops += q_count * k_count * (2 * d_model - 1)
                     connections += q_count * k_count
-                    cluster_sizes.append((q_count, k_count))
+                    active_clusters += 1
         
         # 计算Native QK FLOPs
         native_flops = batch_size * seq_len_q * seq_len_k * (2 * d_model - 1)
         theoretical_connections = batch_size * seq_len_q * seq_len_k
         
-        # 更新统计
+        # 当前batch的统计
+        batch_stats = {
+            'batch_id': batch_id,
+            'batch_size': batch_size,
+            'seq_len_q': seq_len_q,
+            'seq_len_k': seq_len_k,
+            'd_model': d_model,
+            'num_clusters': M,
+            'moe_qk_flops': moe_flops,
+            'native_qk_flops': native_flops,
+            'actual_connections': connections,
+            'theoretical_connections': theoretical_connections,
+            'sparsity': 1 - (connections / theoretical_connections) if theoretical_connections > 0 else 1.0,
+            'flops_reduction': 1 - (moe_flops / native_flops) if native_flops > 0 else 0,
+            'cluster_utilization': active_clusters / (batch_size * M) if M > 0 else 0
+        }
+        
+        # 更新累计统计
         self.stats['total_batches'] += 1
         self.stats['total_qk_flops'] += moe_flops
         self.stats['total_native_flops'] += native_flops
         self.stats['total_connections'] += connections
         self.stats['total_theoretical_connections'] += theoretical_connections
+        self.stats['batch_details'].append(batch_stats)
         
-        # 更新平均稀疏度
-        current_sparsity = 1 - (connections / theoretical_connections)
-        self.stats['avg_sparsity'] = (
-            (self.stats['avg_sparsity'] * (self.stats['total_batches'] - 1) + current_sparsity) 
-            / self.stats['total_batches']
-        )
-        
-        # 记录簇利用率
-        utilization = len(cluster_sizes) / M
-        self.stats['cluster_utilization'].append(utilization)
+        # 立即保存当前batch统计到文件
+        self._save_batch_stats(batch_stats)
     
-    def add_time_measurement(self, category: str, time_ms: float):
-        """添加时间测量"""
-        if not self.enabled:
+    def _save_batch_stats(self, batch_stats: Dict):
+        """保存单个batch的统计到文件"""
+        batch_file = self.output_dir_batch / f"batch_{batch_stats['batch_id']:06d}.json"
+        with open(batch_file, 'w', encoding='utf-8') as f:
+            json.dump(batch_stats, f, indent=2, ensure_ascii=False)
+    
+    def save_final_summary(self, experiment_name: str = "moe_attn_experiment"):
+        """保存最终汇总统计（在训练/测试结束时手动调用）"""
+        if not self.enabled or self.stats['total_batches'] == 0:
             return
-        if category in self.stats['time_measurements']:
-            self.stats['time_measurements'][category].append(time_ms)
+        
+        summary = self.get_summary()
+        summary['experiment_name'] = experiment_name
+        
+        # 保存汇总文件
+        summary_file = self.output_dir / f"{experiment_name}_summary.json"
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+        
+        # 保存详细的batch信息（可选，用于后续分析）
+        details_file = self.output_dir / f"{experiment_name}_batch_details.json"
+        with open(details_file, 'w', encoding='utf-8') as f:
+            json.dump(self.stats['batch_details'], f, indent=2, ensure_ascii=False)
+        
+        print(f"MoE Attention statistics saved to:")
+        print(f"  - Summary: {summary_file}")
+        print(f"  - Batch details: {details_file}")
+        
+        return summary
     
     def get_summary(self) -> Dict:
         """获取统计摘要"""
         if not self.enabled or self.stats['total_batches'] == 0:
             return {}
         
-        summary = {
-            'total_batches': self.stats['total_batches'],
-            'qk_flops_reduction': 1 - (self.stats['total_qk_flops'] / self.stats['total_native_flops']),
-            'average_sparsity': self.stats['avg_sparsity'],
-            'connection_ratio': self.stats['total_connections'] / self.stats['total_theoretical_connections'],
-            'avg_cluster_utilization': sum(self.stats['cluster_utilization']) / len(self.stats['cluster_utilization'])
-                if self.stats['cluster_utilization'] else 0,
-            'total_qk_gflops_saved': (self.stats['total_native_flops'] - self.stats['total_qk_flops']) / 1e9,
-        }
+        total_batches = self.stats['total_batches']
         
-        # 添加时间统计
-        for category, times in self.stats['time_measurements'].items():
-            if times:
-                summary[f'avg_{category}_time_ms'] = sum(times) / len(times)
+        # 计算各种比率
+        qk_flops_reduction = 1 - (self.stats['total_qk_flops'] / 
+                                self.stats['total_native_flops'])
+        
+        avg_sparsity = 1 - (self.stats['total_connections'] / 
+                          self.stats['total_theoretical_connections'])
+        
+        connection_ratio = (self.stats['total_connections'] / 
+                          self.stats['total_theoretical_connections'])
+        
+        # 计算平均簇利用率（从所有batch中计算）
+        utilizations = [batch['cluster_utilization'] for batch in self.stats['batch_details']]
+        avg_cluster_utilization = sum(utilizations) / len(utilizations) if utilizations else 0
+        
+        summary = {
+            'total_batches': total_batches,
+            'qk_flops_reduction': qk_flops_reduction,
+            'average_sparsity': avg_sparsity,
+            'connection_ratio': connection_ratio,
+            'average_cluster_utilization': avg_cluster_utilization,
+            'total_qk_gflops_saved': (self.stats['total_native_flops'] - 
+                                    self.stats['total_qk_flops']) / 1e9,
+            'total_moe_qk_gflops': self.stats['total_qk_flops'] / 1e9,
+            'total_native_qk_gflops': self.stats['total_native_flops'] / 1e9,
+        }
         
         return summary
     
@@ -125,22 +177,16 @@ class AttentionStatistics:
             return
         
         print("\n" + "="*60)
-        print("MoE ATTENTION QK COMPUTATION STATISTICS")
+        print("MoE ATTENTION FLOPs STATISTICS")
         print("="*60)
         print(f"Total Batches Processed: {summary['total_batches']}")
         print(f"QK FLOPs Reduction: {summary['qk_flops_reduction']:.1%}")
         print(f"Average Sparsity: {summary['average_sparsity']:.1%}")
         print(f"Connection Ratio: {summary['connection_ratio']:.3f}")
-        print(f"Average Cluster Utilization: {summary['avg_cluster_utilization']:.1%}")
+        print(f"Average Cluster Utilization: {summary['average_cluster_utilization']:.1%}")
         print(f"Total QK GFLOPs Saved: {summary['total_qk_gflops_saved']:.2f}")
-        
-        # 打印时间统计
-        if 'avg_routing_time_ms' in summary:
-            print(f"\nTiming Statistics:")
-            for key, value in summary.items():
-                if 'time_ms' in key:
-                    category = key.replace('avg_', '').replace('_time_ms', '')
-                    print(f"  Average {category} time: {value:.2f} ms")
+        print(f"Total MoE QK GFLOPs: {summary['total_moe_qk_gflops']:.2f}")
+        print(f"Total Native QK GFLOPs: {summary['total_native_qk_gflops']:.2f}")
         print("="*60 + "\n")
 
 class ClusterTokenStatistics:
@@ -394,6 +440,8 @@ class MoEClusteredAttention(nn.Module):
         self.M = num_clusters
         self.lambda_ = update_weight
         self.use_trainable_center = use_trainable_center
+
+        self.stats = AttentionStatistics(output_dir=f"./attn_results/MoE_attn/overhead/{configs.model}/num_tx_experts_{configs.num_tx_experts}/")
             
         # 根据配置选择簇核心初始化方式
         if use_trainable_center:
@@ -625,8 +673,7 @@ class MoEClusteredAttention(nn.Module):
         )
 
     def f_plot_attn(self, attention_weights, idx):
-        folder_path = './attn_results/MoE_attn/'
-        folder_path  += f"num_centers:{self.configs.num_tx_experts}/"
+        folder_path = f"./attn_results/MoE_attn/plot_attn/{self.configs.model}/num_centers:{self.configs.num_tx_experts}/"
 
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -635,17 +682,6 @@ class MoEClusteredAttention(nn.Module):
 
         attn_visualizer = AttentionHeatmapVisualizer(self.configs)
 
-        # for b_idx in range(attention_weights.shape[0]):
-        #     plot_attn = attention_weights[b_idx]
-        #     plot_full_path = folder_path + f"__b_in_idx:{b_idx}"
-        #     fig1 = attn_visualizer.plot_attention(
-        #             plot_attn,
-        #             title=f"Attention Heatmap ({plot_attn.shape[0]}x{plot_attn.shape[1]})",
-        #             colormap='cool',
-        #             save_path=plot_full_path,
-        #             show_values=True,
-        #             grid=True,
-        #         )
         k_len = attention_weights.shape[-1]
         plot_attn = attention_weights.reshape(-1, k_len)
         plot_full_path = folder_path
@@ -750,27 +786,17 @@ class MoEClusteredAttention(nn.Module):
         
         # 3. 确定专家分配
         assignments = torch.argmax(scores, dim=-1)  # [batch_size, 2*seq_len]
-        
-        # 检查和分析分簇结果 (只在训练时或需要调试时启用)
-        # 条件可以根据需要修改，例如 if self.configs.is_testing:
-        if self.training and self.enable_token_stats:
-            # 步骤 A: 更新当前批次的统计数据
-            self.token_stats.update(assignments, seq_len_q, seq_len_k)
-            
-            # 步骤 B: 在控制台打印详细的分布表格
-            # 为了避免刷屏，可以设置一个条件，比如每隔50个batch打印一次
-            if idx % 50 == 0: 
-                print(f"--- [Batch Index: {idx}] - Cluster Assignment Analysis ---")
-                self.token_stats.print_batch_distribution()
 
-            # 步骤 C (可选): 绘制并保存分布图
-            # 这会生成图片，通常用于更深入的分析，而不是每个batch都调用
-            # if idx % 200 == 0:
-            #     save_path = f"./cluster_plots/batch_{idx}_distribution.png"
-            #     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            #     self.token_stats.plot_distribution(save_path=save_path)
-
-        # --- 核查代码结束 ---
+        if self.configs.is_testing:
+            self.stats.update_qk_stats(
+                        batch_id=idx,
+                        batch_size=Q.size(0),
+                        seq_len_q=Q.size(1),
+                        seq_len_k=K.size(1),
+                        d_model=self.d_model,
+                        assignments=assignments,
+                        M=self.M
+                    )
         
         # 4. 应用专家变换
         x_transformed = torch.zeros_like(x)
@@ -824,17 +850,10 @@ class MoEClusteredAttention(nn.Module):
             
             # 无梯度更新
             self.miu.copy_(new_miu)
+            
         
         return O+Q, 0
 
-    def get_stats_summary(self):
-        """获取统计摘要"""
-        return self.stats.get_summary()
-    
-    def print_stats(self):
-        """打印统计信息"""
-        self.stats.print_summary()
-    
-    def reset_stats(self):
-        """重置统计"""
-        self.stats.reset_stats()
+    def finalize_statistics(self, experiment_name: str = None):
+        """在训练/测试结束时调用此方法保存统计"""
+        return self.stats.save_final_summary(experiment_name)

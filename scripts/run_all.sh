@@ -1,6 +1,6 @@
 export CUDA_VISIBLE_DEVICES=$3
 
-# cd ../
+cd ../
 
 all_models=("Informer" "Reformer" "PatchTST" "iTransformer" "FEDformer" "Nonstationary_Transformer" "TimeXer" "TimesNet" "TimeLLM")
 start_index=$1
@@ -44,7 +44,7 @@ do
         echo "Running model $model_name with root $root_path, data $data_path, and pred_len $pred_len"
         python -u run.py \
           --task_name long_term_forecast \
-          --is_training 1 \
+          --is_training 0 \
           --root_path $root_path \
           --data_path $data_path \
           --model_id ${model_id}_${seed}_24_${pred_len}_fullLLM_${use_fullmodel} \
@@ -75,7 +75,7 @@ do
           --use_text 1 \
           --use_Unified_model ${use_uni} \
           --use_Cross_MoE 1 \
-          --mix_type 1 \
+          --mix_type 2 \
           --use_trainable_center 1 \
           --use_Cross_ranker 0 \
           --calculate_overhead 0 \

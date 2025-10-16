@@ -1,0 +1,9 @@
+long_term_forecast_Energy_2021_24_48_fullLLM_0_TimeLLM_custom_ftS_sl24_ll12_pl48_dm768_nh1_el2_dl1_df2048_expand2_dc4_fc1_ebtimeF_dtTrue_Exp_0_mixtype_2_layer_num_1  
+mse:0.4604678452014923, mae:0.5343434810638428, rmse:0.6785778403282166, mape:2.5928821563720703, mspe:106.25581359863281
+
+long_term_forecast_Security_2021_24_12_fullLLM_0_TimeLLM_custom_ftS_sl24_ll12_pl12_dm768_nh1_el2_dl1_df2048_expand2_dc4_fc1_ebtimeF_dtTrue_Exp_0_mixtype_2_layer_num_1  
+mse:113.3533935546875, mae:5.356294631958008, rmse:10.64675521850586, mape:2.4781978130340576, mspe:223.4609832763672
+
+long_term_forecast_Traffic_2021_24_12_fullLLM_0_TimeLLM_custom_ftS_sl24_ll12_pl12_dm768_nh1_el2_dl1_df2048_expand2_dc4_fc1_ebtimeF_dtTrue_Exp_0_mixtype_2_layer_num_1  
+mse:0.2723958194255829, mae:0.35982051491737366, rmse:0.5219155550003052, mape:0.405342698097229, mspe:0.8169329762458801
+

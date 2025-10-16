@@ -1,0 +1,14 @@
+/attn_results
+/BERT_files
+/checkpoints
+/cluster_visualizations
+/paper
+/results
+/savings
+/test_results
+/tsne_results
+*.tar.gz
+*.tar
+*.npy
+*.png
+*.pdf

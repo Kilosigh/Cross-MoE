@@ -322,6 +322,7 @@ class Model(nn.Module):
         enc_out, aux_loss_ = self.mixer(enc_out, text_embedding, batch_idx) 
         aux_loss += aux_loss_ 
 
+
         enc_out = self.data_manage_mixer_out(enc_out, n_vars)
 
         # print(enc_out.shape)

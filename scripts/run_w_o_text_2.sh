@@ -2,10 +2,9 @@ export CUDA_VISIBLE_DEVICES=$3
 
 cd ../
 
-all_models=("Informer" "Reformer" "PatchTST" "iTransformer" "FEDformer" "Nonstationary_Transformer" "TimeXer" "TimesNet" "TimeLLM")
+all_models=("Informer" "PatchTST" "iTransformer" "TimeLLM"  "TimeXer" "TimesNet")
 start_index=$1
 end_index=$2
-
 use_uni=0
 models=("${all_models[@]:$start_index:$end_index-$start_index+1}")
 root_paths=("./data/Algriculture" "./data/Climate" "./data/Economy" "./data/Energy" "./data/Environment" "./data/Public_Health" "./data/Security" "./data/SocialGood" "./data/Traffic")
@@ -34,7 +33,7 @@ do
       granularity_type=${time_granularity_type[$i]}
       start_offset=$((4 * granularity_type))
       # for pred_len in "${pred_lengths[@]}"
-      for ((k=3; k<4; k++))
+      for ((k=0; k<4; k++))
       do
         pl_addr=$((k + start_offset))
         pred_len=${pred_lengths[$pl_addr]}
@@ -61,26 +60,23 @@ do
           --text_len 4 \
           --prompt_weight 0.1 \
           --pool_type "avg" \
-          --save_name "result_health_bert1" \
+          --save_name "result_health_bert2" \
           --llm_model BERT \
           --huggingface_token 'NA'\
           --use_fullmodel $use_fullmodel \
           --freq ${freq_array[$i]} \
-          --use_tx_moe 1 \
+          --use_tx_moe 0 \
           --use_ts_moe 0 \
-          --num_tx_experts 4 \
+          --num_tx_experts 8 \
           --num_ts_experts 0 \
           --use_eva 0 \
-          --use_text 1 \
+          --use_text 0 \
           --use_Unified_model ${use_uni} \
-          --use_Cross_MoE 1 \
-          --mix_type 2 \
-          --use_trainable_center 1 \
+          --use_Cross_MoE 0 \
+          --mix_type 0 \
+          --use_trainable_center 0 \
           --use_Cross_ranker 0 \
-          --calculate_overhead 0 \
-          --plot_tsne 1 \
-          --use_k_means_init 1 \
-          --plot_attn 1
+          --calculate_overhead 0 
       done
     done
   done
