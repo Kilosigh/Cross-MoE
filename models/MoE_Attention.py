@@ -554,8 +554,8 @@ class MoEClusteredAttention(nn.Module):
         return x_transformed
 
 
-    def _init_with_kmeans(self, init_data, n_init=30, max_iter=500):  # 增加默认值
-        """改进的k-means初始化，解决中心点聚集问题"""
+    def _init_with_kmeans(self, init_data, n_init=30, max_iter=500, cache_path=None):  # 增加默认值
+        """改进的k-means初始化，解决中心点聚集问题，支持缓存"""
         print("使用改进的k-means算法初始化聚类中心")
         
         if isinstance(init_data, torch.Tensor):
@@ -565,6 +565,71 @@ class MoEClusteredAttention(nn.Module):
         
         self.data_np = data_np
 
+        # 检查缓存文件是否存在
+        if cache_path is None:
+            cache_path = f"./checkpoints/k_means_cache/{os.path.basename(self.configs.root_path)}"
+        # 确保缓存目录存在
+        cache_dir = os.path.dirname(cache_path)
+        if cache_dir and not os.path.exists(cache_dir):
+            os.makedirs(cache_dir, exist_ok=True)
+        
+        cache_file = cache_path
+        if os.path.exists(cache_file):
+            print(f"找到缓存文件: {cache_file}")
+            try:
+                # 加载缓存的聚类中心
+                cache_data = torch.load(cache_file)
+                cluster_centers = cache_data['cluster_centers']
+                cluster_labels = cache_data['cluster_labels']
+                self.M = cache_data['M']
+                
+                print(f"从缓存加载 {self.M} 个聚类中心")
+                
+                # 转换为PyTorch张量
+                cluster_centers_tensor = torch.tensor(cluster_centers, dtype=torch.float32)
+
+                # 设置聚类中心
+                if self.shared_router:
+                    if isinstance(self.miu, nn.Parameter):
+                        self.miu.data.copy_(cluster_centers_tensor)
+                    else:
+                        self.miu.copy_(cluster_centers_tensor)
+                else:
+                    if isinstance(self.miu_q, nn.Parameter):
+                        self.miu_q.data.copy_(cluster_centers_tensor)
+                        self.miu_k.data.copy_(cluster_centers_tensor.clone())
+                    else:
+                        self.miu_q.copy_(cluster_centers_tensor)
+                        self.miu_k.copy_(cluster_centers_tensor.clone())
+                
+                # 生成t-SNE图（如果需要）
+                if self.plot_tsne:
+                    folder_path = './tsne_results/init_stage/' + f"num_centers={self.configs.num_tx_experts}/"
+                    if not os.path.exists(folder_path):
+                        os.makedirs(folder_path)
+
+                    visualizer = TSNEVisualizer(output_dir=folder_path, M=self.M)
+                    file_name = f"{self.configs.model_id}_" + f"{self.configs.num_tx_experts}"
+
+                    visualizer.generate_tsne_plot(
+                        data=data_np,
+                        centers=cluster_centers,
+                        labels=cluster_labels,
+                        min_distance=0.5,
+                        title="Cached Clustering",
+                        filename=file_name
+                    )
+                
+                print("成功从缓存加载聚类中心")
+                return  # 直接返回，跳过后续计算
+                
+            except Exception as e:
+                print(f"加载缓存失败: {e}，将重新计算聚类中心")
+                cache_file = None  # 标记为需要重新计算
+
+        # 如果没有缓存或加载失败，执行原始的计算逻辑
+        print("未找到缓存文件或缓存加载失败，开始计算聚类中心...")
+        
         # 1. 数据标准化（解决尺度问题）
         from sklearn.preprocessing import StandardScaler
         scaler = StandardScaler()
@@ -635,7 +700,21 @@ class MoEClusteredAttention(nn.Module):
         cluster_centers = scaler.inverse_transform(best_centers)
         cluster_labels = kmeans.labels_
         
-        # 7. 转换为PyTorch张量
+        # 7. 缓存结果（如果指定了缓存路径）
+        if cache_file is not None:
+            try:
+                cache_data = {
+                    'cluster_centers': cluster_centers,
+                    'cluster_labels': cluster_labels,
+                    'M': self.M,
+                    'timestamp': time.time()
+                }
+                torch.save(cache_data, cache_file)
+                print(f"聚类中心已缓存到: {cache_file}")
+            except Exception as e:
+                print(f"缓存保存失败: {e}")
+        
+        # 8. 转换为PyTorch张量
         cluster_centers_tensor = torch.tensor(cluster_centers, dtype=torch.float32)
 
         if self.shared_router:
@@ -654,19 +733,14 @@ class MoEClusteredAttention(nn.Module):
         
         print(f"成功初始化{self.M}个聚类中心")
         
-        # 8. 生成改进的t-SNE图
-        # if self.plot_tsne:
-        #     self._generate_tsne_plot(data_np, cluster_labels, \
-        #                                                     cluster_centers, min_distance)       
-        #     exit()
-
+        # 9. 生成改进的t-SNE图
         if self.plot_tsne:
             folder_path = './tsne_results/init_stage/' + f"num_centers={self.configs.num_tx_experts}/"
             if not os.path.exists(folder_path):
                 os.makedirs(folder_path)
 
             visualizer = TSNEVisualizer(output_dir=folder_path, M=self.M)
-            file_name =  f"{self.configs.model_id}_" + f"{self.configs.num_tx_experts}"
+            file_name = f"{self.configs.model_id}_" + f"{self.configs.num_tx_experts}"
 
             visualizer.generate_tsne_plot(
                 data=data_np,
@@ -676,8 +750,6 @@ class MoEClusteredAttention(nn.Module):
                 title="Initial Clustering",
                 filename=file_name
             )
-
-            # exit()
 
     def _update_cluster_centers(self, Q, assignments, batch_size, seq_len_q):
         """更新簇核心"""
