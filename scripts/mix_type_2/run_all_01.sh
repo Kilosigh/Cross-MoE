@@ -80,7 +80,7 @@ do
           --use_Cross_ranker 0 \
           --calculate_overhead 0 \
           --plot_tsne 0 \
-          --use_k_means_init 0 \
+          --use_k_means_init 1 \
           --plot_attn 1 \
           --shared_router 0 \
           --shared_experts 1 
