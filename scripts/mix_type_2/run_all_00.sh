@@ -83,7 +83,7 @@ do
           --use_k_means_init 0 \
           --plot_attn 1 \
           --shared_router 0 \
-          --shared_experts 0 \
+          --shared_experts 0 
       done
     done
   done
