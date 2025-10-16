@@ -44,7 +44,7 @@ do
         echo "Running model $model_name with root $root_path, data $data_path, and pred_len $pred_len"
         python -u run.py \
           --task_name long_term_forecast \
-          --is_training 0 \
+          --is_training 1 \
           --root_path $root_path \
           --data_path $data_path \
           --model_id ${model_id}_${seed}_24_${pred_len}_fullLLM_${use_fullmodel} \
@@ -80,7 +80,7 @@ do
           --use_Cross_ranker 0 \
           --calculate_overhead 0 \
           --plot_tsne 0 \
-          --use_k_means_init 1 \
+          --use_k_means_init 0 \
           --plot_attn 1
       done
     done

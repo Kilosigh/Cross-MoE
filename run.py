@@ -19,7 +19,7 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 def get_setting_string(args, ii):
-    setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_expand{}_dc{}_fc{}_eb{}_dt{}_{}_{}_mixtype_{}_layer_num_{}'.format(
+    setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_expand{}_dc{}_fc{}_eb{}_dt{}_{}_{}_mixtype_{}_layer_num_{}_shared_router_{}_shared_experts_{}'.format(
 
                 args.task_name,
                 args.model_id,
@@ -41,7 +41,9 @@ def get_setting_string(args, ii):
                 args.distil,
                 args.des, ii,
                 args.mix_type,
-                args.num_tx_moe_layers)
+                args.num_tx_moe_layers,
+                args.shared_router,
+                args.shared_experts)
     return setting
 
 if __name__ == '__main__':
@@ -180,6 +182,10 @@ if __name__ == '__main__':
     parser.add_argument('--capacity_factor', type=int, default=2)
     parser.add_argument('--use_Unified_model', type=int, default=0)
     parser.add_argument('--output_routing', type=int, default=0, help='whether outputs the routing distribution of MoE net')
+
+    # MoE_Attn
+    parser.add_argument('--shared_router', type=int, default=0)
+    parser.add_argument('--shared_experts', type=int, default=0)
 
     # Evaluation method
     parser.add_argument('--use_text', type=int, default=1)
