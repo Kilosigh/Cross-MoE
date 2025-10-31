@@ -1,11 +1,11 @@
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=$3
 
-cd ../
+cd ../../
 
-all_models=("Informer" "Reformer" "PatchTST" "iTransformer" "FEDformer" "Nonstationary_Transformer" "TimeXer" "TimesNet")
+all_models=("Informer" "Reformer" "PatchTST" "iTransformer" "FEDformer" "Nonstationary_Transformer" "TimeXer" "TimesNet" "TimeLLM")
 start_index=$1
 end_index=$2
-gpu=$3
+
 use_uni=0
 models=("${all_models[@]:$start_index:$end_index-$start_index+1}")
 root_paths=("./data/Algriculture" "./data/Climate" "./data/Economy" "./data/Energy" "./data/Environment" "./data/Public_Health" "./data/Security" "./data/SocialGood" "./data/Traffic")
@@ -45,8 +45,7 @@ do
         echo "Running model $model_name with root $root_path, data $data_path, and pred_len $pred_len"
         python -u run.py \
           --task_name long_term_forecast \
-          --is_training 1 \
-          --gpu $gpu \
+          --is_training 0 \
           --root_path $root_path \
           --data_path $data_path \
           --model_id ${model_id}_${seed}_24_${pred_len}_fullLLM_${use_fullmodel} \
@@ -69,7 +68,7 @@ do
           --freq ${freq_array[$i]} \
           --use_tx_moe 0 \
           --use_ts_moe 0 \
-          --num_tx_experts 8 \
+          --num_tx_experts 4 \
           --num_ts_experts 0 \
           --use_eva 0 \
           --use_text 1 \
@@ -81,7 +80,7 @@ do
           --calculate_overhead 0 \
           --plot_tsne 0 \
           --use_k_means_init 1 \
-          --plot_attn 1 
+          --plot_attn 1
       done
     done
   done

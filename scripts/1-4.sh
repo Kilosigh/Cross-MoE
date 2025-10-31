@@ -1,14 +1,19 @@
 #!/bin/bash
 
 # 使用for循环打印从1到5的数字
-for i in {1..4}
-do
-  ./mix_type_2/run_all_00.sh 6 6 0 $((4*i))
-done
+# for i in {1..4}
+# do
+#   ./mix_type_2/run_all_00.sh 6 6 0 $((4*i))
+# done
 
-for i in {1..4}
+# for i in {1..4}
+# do
+#   ./mix_type_2/run_all_01.sh 6 6 0 $((4*i))
+# done
+
+for i in {4..4}
 do
-  ./mix_type_2/run_all_01.sh 6 6 0 $((4*i))
+  ./mix_type_2/run_all_11.sh 6 6 0 $((4*i))
 done
 
 # for i in {1..4}

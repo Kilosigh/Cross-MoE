@@ -14,6 +14,7 @@ data_paths=("US_RetailBroilerComposite_Month.csv" "US_precipitation_month.csv" "
 # data_paths=("Algriculture_non.csv" "Algriculture_LLM.csv" "Algriculture_LLM_gpt4.csv" )
 
 
+
 time_granularity_type=(0 0 0 1 2 1 0 0 0)
 freq_array=("m" "m" "m" "w" "d" "w" "m" "m" "m" )
 day_pred_lengths=(48 96 192 336)
@@ -28,12 +29,12 @@ for seed in "${seeds[@]}"
 do
   for model_name in "${models[@]}"
   do
-    for ((i=0; i<$length; i++))
+    for ((i=4; i<$length; i++))
     do
       granularity_type=${time_granularity_type[$i]}
       start_offset=$((4 * granularity_type))
       # for pred_len in "${pred_lengths[@]}"
-      for ((k=0; k<4; k++))
+      for ((k=3; k<4; k++))
       do
         pl_addr=$((k + start_offset))
         pred_len=${pred_lengths[$pl_addr]}

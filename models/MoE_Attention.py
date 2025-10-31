@@ -567,7 +567,7 @@ class MoEClusteredAttention(nn.Module):
 
         # 检查缓存文件是否存在
         if cache_path is None:
-            cache_path = f"./checkpoints/k_means_cache/{os.path.basename(self.configs.root_path)}"
+            cache_path = f"./checkpoints/k_means_cache/num_cluster_{self.M}/d_model_{self.d_model}/{os.path.basename(self.configs.root_path)}"
         # 确保缓存目录存在
         cache_dir = os.path.dirname(cache_path)
         if cache_dir and not os.path.exists(cache_dir):
@@ -905,7 +905,7 @@ class MoEClusteredAttention(nn.Module):
                 
         return attention_output, attention_weights
 
-    def forward(self, Q, K, V, idx):
+    def forward(self, Q, K, V, idx=0):
         batch_size, seq_len_q, d = Q.shape
         _, seq_len_k, _ = K.shape
         device = Q.device

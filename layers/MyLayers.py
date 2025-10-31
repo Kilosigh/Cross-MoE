@@ -209,10 +209,12 @@ class MixerLayer(nn.Module):
             
         
             if self.configs.plot_attn and self.configs.is_testing:
-                folder_path = './attn_results/Native_attn/'
-                folder_path  += f"num_centers:{self.configs.num_tx_experts}/"
+                K = 20
 
-                head_path = folder_path + "heat_npy_data/"
+                folder_path = './attn_results/Native_attn/'
+                folder_path  += f"num_centers:{self.configs.num_tx_experts}/top_k={K}/"       
+
+                head_path = folder_path + f"heat_npy_data/"
 
                 if not os.path.exists(head_path):
                     os.makedirs(head_path)
@@ -224,10 +226,7 @@ class MixerLayer(nn.Module):
                 np.save(base_filepath + '_attention_weights.npy', attention_weights_np)
                 print(f"Saved original attention_weights to {base_filepath}_attention_weights.npy")
 
-                # --- ✨ 新增：为绘图准备“逐行Top-K + Softmax”数据 ✨ ---
-                
-                # a. 设置K值
-                K = 20
+                # --- ✨ 新增：为绘图准备“逐行Top-K + Softmax”数据 ✨ ---  
                 
                 # b. 将多维注意力权重展平为2D矩阵 (N, M)
                 key_len = attention_weights_np.shape[-1]
@@ -235,19 +234,21 @@ class MixerLayer(nn.Module):
                 
                 # c. 逐行找出Top-K值的索引
                 # np.argsort(...) 返回的是从小到大排序的索引，所以我们取最后K个
-                topk_indices = np.argsort(attn_2d, axis=1)[:, -K:]
+                # topk_indices = np.argsort(attn_2d, axis=1)[:, -K:]
                 
-                # d. 创建一个稀疏矩阵，只保留Top-K位置的原始值
-                # np.take_along_axis 从attn_2d中根据topk_indices提取出实际的Top-K值
-                topk_values = np.take_along_axis(attn_2d, topk_indices, axis=1)
+                # # d. 创建一个稀疏矩阵，只保留Top-K位置的原始值
+                # # np.take_along_axis 从attn_2d中根据topk_indices提取出实际的Top-K值
+                # topk_values = np.take_along_axis(attn_2d, topk_indices, axis=1)
                 
-                # 创建一个填充了-inf的矩阵
-                filtered_attn = np.full_like(attn_2d, -np.inf)
-                # 使用 np.put_along_axis 将Top-K值放回原位
-                np.put_along_axis(filtered_attn, topk_indices, topk_values, axis=1)
+                # # 创建一个填充了-inf的矩阵
+                # filtered_attn = np.full_like(attn_2d, -np.inf)
+                # # 使用 np.put_along_axis 将Top-K值放回原位
+                # np.put_along_axis(filtered_attn, topk_indices, topk_values, axis=1)
 
-                # e. 对这个新的稀疏矩阵，逐行重新计算Softmax
-                plot_attn_data = softmax_np(filtered_attn, axis=1)
+                # # e. 对这个新的稀疏矩阵，逐行重新计算Softmax
+                # plot_attn_data = softmax_np(filtered_attn, axis=1)
+
+                plot_attn_data = attn_2d
                 
                 # --- ✨ 新增代码结束 ✨ ---
 

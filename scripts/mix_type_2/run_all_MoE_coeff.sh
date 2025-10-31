@@ -1,11 +1,10 @@
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=$3
 
 cd ../
 
-all_models=("Informer" "Reformer" "PatchTST" "iTransformer" "FEDformer" "Nonstationary_Transformer" "TimeXer" "TimesNet")
+all_models=("Informer" "Reformer" "PatchTST" "iTransformer" "FEDformer" "Nonstationary_Transformer" "TimeXer" "TimesNet" "TimeLLM")
 start_index=$1
 end_index=$2
-gpu=$3
 use_uni=0
 models=("${all_models[@]:$start_index:$end_index-$start_index+1}")
 root_paths=("./data/Algriculture" "./data/Climate" "./data/Economy" "./data/Energy" "./data/Environment" "./data/Public_Health" "./data/Security" "./data/SocialGood" "./data/Traffic")
@@ -34,7 +33,7 @@ do
       granularity_type=${time_granularity_type[$i]}
       start_offset=$((4 * granularity_type))
       # for pred_len in "${pred_lengths[@]}"
-      for ((k=3; k<4; k++))
+      for ((k=0; k<4; k++))
       do
         pl_addr=$((k + start_offset))
         pred_len=${pred_lengths[$pl_addr]}
@@ -46,7 +45,6 @@ do
         python -u run.py \
           --task_name long_term_forecast \
           --is_training 1 \
-          --gpu $gpu \
           --root_path $root_path \
           --data_path $data_path \
           --model_id ${model_id}_${seed}_24_${pred_len}_fullLLM_${use_fullmodel} \
@@ -62,26 +60,30 @@ do
           --text_len 4 \
           --prompt_weight 0.1 \
           --pool_type "avg" \
-          --save_name "result_health_bert" \
+          --save_name "MoE_coeff" \
           --llm_model BERT \
           --huggingface_token 'NA'\
           --use_fullmodel $use_fullmodel \
           --freq ${freq_array[$i]} \
-          --use_tx_moe 0 \
+          --use_tx_moe 1 \
           --use_ts_moe 0 \
-          --num_tx_experts 8 \
+          --num_tx_experts $4 \
           --num_ts_experts 0 \
+          --num_tx_moe_layers 1 \
+          --num_ts_moe_layers 0 \
           --use_eva 0 \
           --use_text 1 \
           --use_Unified_model ${use_uni} \
           --use_Cross_MoE 1 \
-          --mix_type 1 \
+          --mix_type 2 \
           --use_trainable_center 1 \
           --use_Cross_ranker 0 \
           --calculate_overhead 0 \
           --plot_tsne 0 \
           --use_k_means_init 1 \
-          --plot_attn 1 
+          --plot_attn 0 \
+          --shared_router 0 \
+          --shared_experts 1 
       done
     done
   done
