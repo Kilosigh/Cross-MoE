@@ -81,7 +81,7 @@ do
           --calculate_overhead 0 \
           --plot_tsne 0 \
           --use_k_means_init 1 \
-          --plot_attn 1 \
+          --plot_attn 0 \
           --shared_router 1 \
           --shared_experts 0 
       done
