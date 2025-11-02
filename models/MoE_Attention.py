@@ -907,11 +907,71 @@ class MoEClusteredAttention(nn.Module):
                 
         return attention_output, attention_weights
 
+<<<<<<< HEAD
     def forward(self, Q, K, V, idx):
         if self.self_attn:
             K = Q
             V = Q
 
+=======
+    # ---------------------------- 聚类注意力部分 ----------------------------
+    def generate_clustered_attention_batch(self, Q_prime, K_prime, V, assignments):
+        B,H,Sq,Dh = Q_prime.shape
+        _,_,Sk,_ = K_prime.shape
+
+        query_assignments = assignments[:,:,:Sq]
+        key_assignments = assignments[:,:,Sq:]
+
+        attn_scores = torch.zeros(B, H, Sq, Sk, device=Q_prime.device, dtype=Q_prime.dtype)
+       
+        mask = (query_assignments.unsqueeze(-1) == key_assignments.unsqueeze(-2))
+        # mask: (B, H, Sq, Sk) - 布尔掩码，标识哪些查询-键对属于同一簇
+        if mask.any():
+        # 对同类位置计算注意力分数
+            same_cluster_idx = mask.nonzero(as_tuple=True)  # 获取同类位置索引
+
+            # 高级索引，同批次，同一个头，的q和k计算
+            ## 这里理不清了，ai说是头独立和簇独立的。
+            q_sel = Q_prime[same_cluster_idx[0], same_cluster_idx[1], same_cluster_idx[2]]  # [N, Dh]
+            k_sel = K_prime[same_cluster_idx[0], same_cluster_idx[1], same_cluster_idx[3]]  # [N, Dh]
+            scores = torch.sum(q_sel * k_sel, dim=-1) / (Dh ** 0.5 )  # [N]
+            attn_scores[same_cluster_idx] = scores  # 更新同类位置分数
+
+        # softmax
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        attention_output = torch.matmul(attn_probs, V)
+       
+        attn_probs = attn_probs.detach().cpu().numpy()
+        return attention_output, attn_probs
+
+    def generate_clustered_attention_batch_dense(self, Q_prime, K_prime, V_prime, assignments):
+        B, H, Sq, Dh = Q_prime.shape
+        _, _, Sk, _ = K_prime.shape
+
+        query_assignments = assignments[:, :, :Sq]      # (B, H, Sq)
+        key_assignments   = assignments[:, :, Sq:]      # (B, H, Sk)
+
+        # 1. 全量 QK 计算（高度并行）
+        attn_scores = torch.matmul(Q_prime, K_prime.transpose(-2, -1)) / (Dh ** 0.5)
+
+        # 2. 构建“不同簇”掩码（注意：是 !=）
+        mask = (query_assignments.unsqueeze(-1) != key_assignments.unsqueeze(-2))  # (B, H, Sq, Sk)
+
+        # 3. 关键：用 -inf 掩盖不同簇 → softmax 后概率为 0
+        attn_scores = attn_scores.masked_fill(mask, float('-inf'))
+
+        # 4. softmax（自动在同簇 key 上归一化）
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        attn_probs = attn_probs.detach().cpu().numpy()
+
+        # 5. 输出
+        return torch.matmul(attn_probs, V_prime), attn_probs
+
+
+
+
+    def forward(self, Q, K, V, idx=0):
+>>>>>>> efc7024cd7e968dbacbcf4db525746db64e2d41a
         batch_size, seq_len_q, d = Q.shape
         _, seq_len_k, _ = K.shape
         device = Q.device

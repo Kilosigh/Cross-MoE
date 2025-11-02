@@ -67,7 +67,7 @@ do
           --huggingface_token 'NA'\
           --use_fullmodel $use_fullmodel \
           --freq ${freq_array[$i]} \
-          --use_tx_moe 1 \
+          --use_tx_moe 0 \
           --use_ts_moe 0 \
           --num_tx_experts 8 \
           --num_ts_experts 0 \

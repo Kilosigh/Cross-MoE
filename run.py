@@ -182,6 +182,7 @@ if __name__ == '__main__':
     parser.add_argument('--capacity_factor', type=int, default=2)
     parser.add_argument('--use_Unified_model', type=int, default=0)
     parser.add_argument('--output_routing', type=int, default=0, help='whether outputs the routing distribution of MoE net')
+    parser.add_argument('--balance_coeff', type=float, default=0.1)
 
     # MoE_Attn
     parser.add_argument('--shared_router', type=int, default=0)
