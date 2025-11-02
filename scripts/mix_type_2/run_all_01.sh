@@ -60,7 +60,7 @@ do
           --text_len 4 \
           --prompt_weight 0.1 \
           --pool_type "avg" \
-          --save_name "result_health_bert2" \
+          --save_name "uniform_init_router_01" \
           --llm_model BERT \
           --huggingface_token 'NA'\
           --use_fullmodel $use_fullmodel \
