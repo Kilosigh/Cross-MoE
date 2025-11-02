@@ -5,6 +5,7 @@
 /paper
 /results
 /savings
+/scripts
 /test_results
 /tsne_results
 *.tar.gz
