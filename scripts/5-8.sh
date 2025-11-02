@@ -13,7 +13,13 @@
 #   ./mix_type_2/run_all_10.sh 6 6 0 $((4*i))
 # done
 
-for i in {1..2}
-do
-  ./mix_type_2/run_all_11.sh 6 6 0 $((4*i))
+# for i in {1..2}
+# do
+#   ./mix_type_2/run_all_11.sh 6 6 0 $((4*i))
+# done
+
+BALANCE_LOSS_WEIGHTS=("0.0001" "0.001" "0.005" "0.01" "0.1")
+
+for weight in "${BALANCE_LOSS_WEIGHTS[@]}"; do
+    ./mix_type_2/run_all_MoE_coeff.sh 6 6 0 8 $weight
 done

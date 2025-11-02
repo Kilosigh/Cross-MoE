@@ -259,3 +259,6 @@ mse:0.16710779070854187, mae:0.21877186000347137, rmse:0.40878820419311523, mape
 long_term_forecast_Traffic_2021_24_12_fullLLM_0_TimeXer_custom_ftS_sl24_ll12_pl12_dm768_nh1_el2_dl1_df2048_expand2_dc4_fc1_ebtimeF_dtTrue_Exp_0_mixtype_2_layer_num_1_shared_router_1_shared_experts_1  
 mse:0.19442595541477203, mae:0.20834191143512726, rmse:0.4409375786781311, mape:0.24451035261154175, mspe:0.4424513876438141
 
+long_term_forecast_Environment_2021_24_336_fullLLM_0_TimeXer_custom_ftS_sl24_ll12_pl336_dm768_nh1_el2_dl1_df2048_expand2_dc4_fc1_ebtimeF_dtTrue_Exp_0_mixtype_2_layer_num_1_shared_router_1_shared_experts_1  
+mse:0.4676864445209503, mae:0.5154086947441101, rmse:0.6838760375976562, mape:2.272578001022339, mspe:236.43167114257812
+

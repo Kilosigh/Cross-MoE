@@ -33,7 +33,7 @@ do
       granularity_type=${time_granularity_type[$i]}
       start_offset=$((4 * granularity_type))
       # for pred_len in "${pred_lengths[@]}"
-      for ((k=0; k<4; k++))
+      for ((k=3; k<4; k++))
       do
         pl_addr=$((k + start_offset))
         pred_len=${pred_lengths[$pl_addr]}
@@ -83,7 +83,8 @@ do
           --use_k_means_init 1 \
           --plot_attn 0 \
           --shared_router 0 \
-          --shared_experts 1 
+          --shared_experts 1 \
+          --balance_coeff $5
       done
     done
   done
