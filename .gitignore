@@ -13,9 +13,5 @@
 *.npy
 *.png
 *.pdf
-<<<<<<< HEAD
 result*
 MoE_coeff
-=======
-result*
->>>>>>> 376ff4cdc68332aee79cf51a33b02aebb5a8b615
