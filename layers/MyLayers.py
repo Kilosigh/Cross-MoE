@@ -204,7 +204,6 @@ class MixerLayer(nn.Module):
     def forward(self, ts, text, batch_idx):
         aux_loss = 0
         if self.mix_type == 1:
-            
             x, attention_weights = self.my_cross(ts, text, batch_idx)
             
         

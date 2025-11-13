@@ -126,3 +126,27 @@ def load_content(args):
     with open('./data/prompt_bank/{0}.txt'.format(file), 'r') as f:
         content = f.read()
     return content
+
+def nan_debugging_report(enc_out, str="None"):
+    print(str)
+    nan_mask = torch.isnan(enc_out)
+    if nan_mask.any():
+        # .nonzero() 返回一个张量，每行是一个 True 元素的索引
+        # 例如，如果 enc_out 是 (B, L, D) 维, nan_indices 将是 (N, 3) 维
+        # N 是 NaN 值的总数
+        nan_indices = torch.nonzero(nan_mask)
+        print(f"Warning: {str} contains NaN!")
+        print(f"NaN (非数) 值的数量: {nan_indices.shape[0]}")
+        print("NaN (非数) 值的具体位置 (indices):")
+        print(nan_indices)
+        exit()
+
+    # 2. 检查 Inf (Infinity, 包括正无穷和负无穷)
+    inf_mask = torch.isinf(enc_out)
+    if inf_mask.any():
+        inf_indices = torch.nonzero(inf_mask)
+        print("Warning: {str} contains Inf!")
+        print(f"Inf (无穷) 值的数量: {inf_indices.shape[0]}")
+        print("Inf (无穷) 值的具体位置 (indices):")
+        print(inf_indices)
+        exit()

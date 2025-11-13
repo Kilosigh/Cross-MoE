@@ -214,6 +214,7 @@ if __name__ == '__main__':
     parser.add_argument('--world_size', type=int, default=2)
     parser.add_argument('--rank', type=int, default=0)
 
+    parser.add_argument('--is_debugging', type=int, default=0)
 
 
     args = parser.parse_args()

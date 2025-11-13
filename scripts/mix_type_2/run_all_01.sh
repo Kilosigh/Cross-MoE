@@ -83,7 +83,8 @@ do
           --use_k_means_init 1 \
           --plot_attn 0 \
           --shared_router 0 \
-          --shared_experts 1 
+          --shared_experts 1 \
+          --balance_coeff 0.01
       done
     done
   done

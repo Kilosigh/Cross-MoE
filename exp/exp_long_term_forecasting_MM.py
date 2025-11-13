@@ -495,7 +495,7 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
 
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-                dynamic_weight = DynamicAuxLossWeight()
+                dynamic_weight = DynamicAuxLossWeight(alpha=self.args.balance_coeff)
 
                 prompt_y = outputs
 
@@ -523,7 +523,7 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
         self.model.train()
 
         return total_loss
-
+    
     def train(self, setting):
         self.args.is_testing = 0
         train_data, train_loader = self._get_data(flag='train')
@@ -543,7 +543,8 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
 
         criterion = self._select_criterion()
 
-
+        if self.args.is_debugging:
+            torch.autograd.set_detect_anomaly(True)
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -551,99 +552,114 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
         for epoch in range(self.args.train_epochs):
             iter_count = 0
             train_loss = []
-
             self.model.train()
             if self.args.use_dist_training:
                 self.args.sampler.set_epoch(epoch)  
             epoch_time = time.time()
+            
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark,index) in enumerate(train_loader):
-                iter_count += 1
-                model_optim.zero_grad()
+                try:
+                    iter_count += 1
+                    model_optim.zero_grad()
+                    batch_x = batch_x.float().to(self.device)
+                    batch_y = batch_y.float().to(self.device)
+                    #0523
+                    if self.args.features == "S":
+                        prior_y=torch.from_numpy(train_data.get_prior_y(index)).float().to(self.device)
+                    else:
+                        prior_y = 0
+                    
+                    batch_x_mark = batch_x_mark.float().to(self.device)
+                    batch_y_mark = batch_y_mark.float().to(self.device)
+                    # decoder input 给定一定的前文提示，当做解码器的输入
+                    dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                    dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                    batch_text=train_data.get_text(index)
+                    # encoder - decoder
+                    if self.args.calculate_overhead:
+                        # flops, params = profile(self.model, inputs=((batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text)))
+                        # print('FLOPs = ' + str(flops / 1000 ** 3) + 'G')
+                        # print('Params = ' + str(params / 1000 ** 2) + 'M')
+                        # print(stat(self.model, (batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text)))
+                        from calculate_overhead import Overhead
+                        Overhead(self.args)
+                        return
+                    
+                    # if self.args.is_debugging:
+                    #     hooks  = self.debug_multiplication_operations(self.model, (batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text))
 
-                batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float().to(self.device)
-                #0523
-                if self.args.features == "S":
-                    prior_y=torch.from_numpy(train_data.get_prior_y(index)).float().to(self.device)
-                else:
-                    prior_y = 0
-                
-                batch_x_mark = batch_x_mark.float().to(self.device)
-                batch_y_mark = batch_y_mark.float().to(self.device)
-
-                # decoder input 给定一定的前文提示，当做解码器的输入
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
-                batch_text=train_data.get_text(index)
-                # encoder - decoder
-                if self.args.calculate_overhead:
-                    # flops, params = profile(self.model, inputs=((batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text)))
-                    # print('FLOPs = ' + str(flops / 1000 ** 3) + 'G')
-                    # print('Params = ' + str(params / 1000 ** 2) + 'M')
-                    # print(stat(self.model, (batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text)))
-                    from calculate_overhead import Overhead
-                    Overhead(self.args)
-                    return
-                if self.args.use_amp:
-                    with torch.cuda.amp.autocast():
+                    if self.args.use_amp:
+                        with torch.cuda.amp.autocast():
+                            ret_dict = self.model((batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text))
+                    else:
                         ret_dict = self.model((batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text))
-                else:
-                    ret_dict = self.model((batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text))
-                vars = safe_unpack(ret_dict)
-                outputs, prompt_emb, aux_loss = vars.outputs, vars.prompt_emb, vars.aux_loss
-                
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                    vars = safe_unpack(ret_dict)
+                    outputs, prompt_emb, aux_loss = vars.outputs, vars.prompt_emb, vars.aux_loss
 
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-                dynamic_weight = DynamicAuxLossWeight()
+                    f_dim = -1 if self.args.features == 'MS' else 0
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                    dynamic_weight = DynamicAuxLossWeight()
+                    prompt_y = outputs
+                    if self.args.use_text:
+                        prompt_y = norm(prompt_emb) + prior_y
+                    if self.args.use_eva:
+                        outputs = self.prompt_weight_method(outputs, prompt_y)
+                    else:
+                        outputs = (1 - self.prompt_weight) * outputs + self.prompt_weight * prompt_y
+                    
+                    # if torch.isnan(outputs).any() or torch.isinf(outputs).any():
+                    #     print("Warning: outputs is NaN or Inf!")
+                    #     print(outputs)
 
-                prompt_y = outputs
+                    loss_ts = criterion(outputs, batch_y)
+                    loss = loss_ts
+                    if self.args.use_text and self.args.use_tx_moe or self.args.use_ts_moe:
+                        # loss += dynamic_weight(loss_ts, aux_loss).detach() * aux_loss
+                        loss += self.args.balance_coeff * aux_loss
 
-                if self.args.use_text:
-                    prompt_y = norm(prompt_emb) + prior_y
-
-                if self.args.use_eva:
-                    outputs = self.prompt_weight_method(outputs, prompt_y)
-                else:
-                    outputs = (1 - self.prompt_weight) * outputs + self.prompt_weight * prompt_y
-                
-                loss_ts = criterion(outputs, batch_y)
-                loss = loss_ts
-                if self.args.use_text and self.args.use_tx_moe or self.args.use_ts_moe:
-                    loss += dynamic_weight(loss_ts, aux_loss).detach() * aux_loss
-
-                train_loss.append(loss.item())
-
-                if (i + 1) % 100 == 0:
-                    print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
-                    speed = (time.time() - time_now) / iter_count
-                    left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
-                    print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
-                    iter_count = 0
-                    time_now = time.time()
-
-                if self.args.use_amp:
-                    scaler.scale(loss).backward()
-                    scaler.step(model_optim)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    model_optim.step()
+                    train_loss.append(loss.item())
+                    if (i + 1) % 100 == 0:
+                        print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
+                        speed = (time.time() - time_now) / iter_count
+                        left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
+                        print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
+                        iter_count = 0
+                        time_now = time.time()
+                    model = self.model.mixer.moe_enhanced_cross
+                    if self.args.is_debugging:
+                        print("前向传播后 - miu_Q:", model.miu_Q.min().item(), model.miu_Q.max().item())
+                        print("前向传播后 - miu_K:", model.miu_K.min().item(), model.miu_K.max().item())
+                    if self.args.use_amp:
+                        scaler.scale(loss).backward()
+                        scaler.step(model_optim)
+                        scaler.update()
+                    else:
+                        model_optim.zero_grad()
+                        loss.backward()
+                        model_optim.step()
+                    if self.args.is_debugging:
+                        print("反向传播后 - miu_Q:", model.miu_Q.min().item(), model.miu_Q.max().item())
+                        print("反向传播后 - miu_K:", model.miu_K.min().item(), model.miu_K.max().item())
+                except RuntimeError as e:
+                    print(f"捕获到异常: {e}")
+                finally:
+                    # 清理钩子
+                    # if self.args.is_debugging:
+                    #     for hook in hooks:
+                    #         hook.remove()
+                    pass
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
-
             vali_loss = self.vali(vali_data, vali_loader, criterion)
             test_loss = self.vali(test_data, test_loader, criterion)
-
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
                 epoch + 1, train_steps, train_loss, vali_loss, test_loss))
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
-
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
         best_model_path = path + '/' + 'checkpoint.pth'

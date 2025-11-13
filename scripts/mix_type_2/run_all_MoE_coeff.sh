@@ -60,7 +60,7 @@ do
           --text_len 4 \
           --prompt_weight 0.1 \
           --pool_type "avg" \
-          --save_name "MoE_coeff" \
+          --save_name "result_MoE_coeff" \
           --llm_model BERT \
           --huggingface_token 'NA'\
           --use_fullmodel $use_fullmodel \
@@ -80,7 +80,7 @@ do
           --use_Cross_ranker 0 \
           --calculate_overhead 0 \
           --plot_tsne 0 \
-          --use_k_means_init 1 \
+          --use_k_means_init 0 \
           --plot_attn 0 \
           --shared_router 0 \
           --shared_experts 1 \

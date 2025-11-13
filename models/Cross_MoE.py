@@ -13,6 +13,7 @@ from models.PatchTST import Transpose, FlattenHead
 from mixture_of_experts import MoE, HeirarchicalMoE
 from exp.exp_model_dict import model_dict
 from models import SwitchTransformer 
+from utils.tools import nan_debugging_report
 
 
 def get_first_return_value(*args):
@@ -322,6 +323,8 @@ class Model(nn.Module):
         enc_out, aux_loss_ = self.mixer(enc_out, text_embedding, batch_idx) 
         aux_loss += aux_loss_ 
 
+        if self.configs.is_debugging:
+            nan_debugging_report(enc_out, "after_mixer")
 
         enc_out = self.data_manage_mixer_out(enc_out, n_vars)
 
