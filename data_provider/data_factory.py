@@ -1,4 +1,4 @@
-from data_provider.data_loader import Dataset_Custom, Dataset_M4, PSMSegLoader, \
+from data_provider.data_loader import Dataset_Custom, Dataset_Custom_uni_modal, Dataset_M4, PSMSegLoader, \
     MSLSegLoader, SMAPSegLoader, SMDSegLoader, SWATSegLoader
 from data_provider.uea import collate_fn
 from torch.utils.data import DataLoader
@@ -7,6 +7,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 data_dict = {
     'custom': Dataset_Custom,
+    'custom_uni_modal': Dataset_Custom_uni_modal,
     'm4': Dataset_M4,
     'PSM': PSMSegLoader,
     'MSL': MSLSegLoader,

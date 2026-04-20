@@ -185,9 +185,9 @@ class PatchEmbedding(nn.Module):
     def forward(self, x, x_mark_enc=None):
         # do patching
         x = x.permute(0, 2, 1)
-        print(x.shape)
+        # print(x.shape)
         x = self.padding_patch_layer(x)
-        print(x.shape)
+        # print(x.shape)
         x = x.unfold(dimension=-1, size=self.patch_len, step=self.stride)
         x = torch.reshape(x, (x.shape[0] * x.shape[1], x.shape[2], x.shape[3]))
         # Input encoding

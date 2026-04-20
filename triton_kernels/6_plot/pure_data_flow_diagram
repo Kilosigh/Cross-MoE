@@ -1,0 +1,37 @@
+digraph "Pure Data Flow" {
+	fontname=SimHei rankdir=TB splines=ortho
+	node [color="#2b8cbe" fillcolor="#e8f4f8" fontname=SimHei shape=box style="rounded,filled"]
+	LiveText [label="实时输入文本
+(模拟外部事件)"]
+	LiveEmb [label="实时文本特征向量
+(Shape: N_now x d)"]
+	HistEmb [label="历史文本特征向量
+预计算落盘 (Shape: N_his x d)"]
+	TextFeatures [label="完整文本特征张量
+(Shape: N x d)"]
+	node [color="#d95f02" fillcolor="#fdf0e6" style="rounded,filled"]
+	HistTS [label="历史原始时间序列
+(日频/小时频)"]
+	TSPatches [label="时间序列Patch特征
+(Shape: L x d)"]
+	node [color="#7570b3" fillcolor="#f4eef7" style="rounded,filled"]
+	HeteroData [label="异构多模态输入特征"]
+	node [color="#2ca25f" fillcolor="#eef7ee" style="rounded,filled"]
+	PredTS [label="预测未来时间序列
+(Shape: H x 1)"]
+	AttnMatrix [label="稠密注意力权重矩阵
+(Shape: L x N)"]
+	edge [color="#555555" fontname=SimHei fontsize=10]
+	LiveText -> LiveEmb [label=" LLM 实时特征提取"]
+	HistEmb -> TextFeatures [label=" 依时间窗口 (如近7天) 拼接"]
+	LiveEmb -> TextFeatures [label=" 特征拼接 (Concat)"]
+	HistTS -> TSPatches [label=" 依时间窗口 (如近60天) 提取 & Patching分块"]
+	TextFeatures -> HeteroData [label=" 注入"]
+	TSPatches -> HeteroData [label=" 注入"]
+	HeteroData -> PredTS [label=" [默认路由]
+Triton 算子计算 (计算与显存访问融合)"]
+	HeteroData -> PredTS [label=" [可视化路由]
+PyTorch 原生计算" color="#7570b3" style=dashed]
+	HeteroData -> AttnMatrix [label=" [可视化路由]
+反向提取与保留中间激活值" color="#7570b3" style=dashed]
+}

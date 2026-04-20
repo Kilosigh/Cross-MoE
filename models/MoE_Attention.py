@@ -9,6 +9,7 @@ import seaborn as sns  # 用于美化图表
 import os
 from visualization.tSNE import TSNEVisualizer
 from visualization.attn_heat_map import AttentionHeatmapVisualizer
+from triton_kernels.split_k_fw_plus_bwd import FinalCrossMoEMultiHeadAttentionFunc
 from utils.tools import nan_debugging_report
 from typing import Dict, Optional
 import time
@@ -437,12 +438,16 @@ class MoEClusteredAttention(nn.Module):
         self.plot_tsne = configs.plot_tsne  # 保存绘图标志
         self.tsne_path = None
 
+        self.use_triton = getattr(configs, 'use_triton', True)
+        self.num_splits = getattr(configs, 'triton_num_splits', 2)
+
         self.d_model = d_model
         self.head_dim = d_model
         self.M = num_clusters
         self.lambda_ = update_weight
         self.use_trainable_center = use_trainable_center
         self.num_heads = num_heads
+        self.use_learnable_text_emb = configs.use_learnable_text_emb
 
         self.activation = nn.GELU()
         self.dropout = nn.Dropout(0.1)
@@ -461,7 +466,9 @@ class MoEClusteredAttention(nn.Module):
         # expert_hidden_dim = expert_hidden_dim or 4 * d_model
 
         expert_hidden_dim = d_model
-        
+
+        self.H = 6
+        d_model_head = d_model // self.H 
         # ----------------------------
         # Router (miu) 参数
         # ----------------------------
@@ -478,14 +485,18 @@ class MoEClusteredAttention(nn.Module):
         # ----------------------------
         if self.shared_experts:
             # Q 和 K 共享专家
-            self.experts_weight = nn.Parameter(torch.empty(num_heads, num_clusters, d_model, expert_hidden_dim))
-            self.experts_bias = nn.Parameter(torch.empty(num_heads, num_clusters, expert_hidden_dim))
+            self.experts_weight = nn.Parameter(torch.empty(self.H, num_clusters, d_model_head, d_model_head))
+            self.experts_bias = nn.Parameter(torch.empty(self.H, num_clusters, d_model_head))
         else:
             # Q 和 K 各自拥有专家
-            self.experts_Q_weight = nn.Parameter(torch.empty(num_heads, num_clusters, d_model, expert_hidden_dim))
-            self.experts_Q_bias = nn.Parameter(torch.empty(num_heads, num_clusters, expert_hidden_dim))
-            self.experts_K_weight = nn.Parameter(torch.empty(num_heads, num_clusters, d_model, expert_hidden_dim))
-            self.experts_K_bias = nn.Parameter(torch.empty(num_heads, num_clusters, expert_hidden_dim))
+            self.experts_Q_weight = nn.Parameter(torch.empty(self.H, num_clusters, d_model_head, d_model_head))
+            self.experts_Q_bias = nn.Parameter(torch.empty(self.H, num_clusters, d_model_head))
+            self.experts_K_weight = nn.Parameter(torch.empty(self.H, num_clusters, d_model_head, d_model_head))
+            self.experts_K_bias = nn.Parameter(torch.empty(self.H, num_clusters, d_model_head))
+
+        if self.use_triton:
+            self.V_weight = nn.Parameter(torch.randn(d_model, expert_hidden_dim) * (d_model ** -0.5))
+            
         
         if not self.configs.is_training:
             return 
@@ -552,37 +563,6 @@ class MoEClusteredAttention(nn.Module):
         scores = torch.matmul(x, miu_expanded.transpose(-2, -1)) / (self.d_model ** 0.5)
         return scores
 
-    # ---------------------------- 专家网络部分 ----------------------------
-    # def apply_experts_batch(self, x, assignments, is_query=True):
-    #     B, S, D = x.shape
-    #     H = self.num_heads
-    #     device = x.device
-
-    #     # 选择专家参数
-    #     if self.shared_experts:
-    #         W, b = self.experts_weight, self.experts_bias
-    #     else:
-    #         if is_query:
-    #             W, b = self.experts_Q_weight, self.experts_Q_bias
-    #         else:
-    #             W, b = self.experts_K_weight, self.experts_K_bias
-
-    #     x_exp = x.unsqueeze(1).expand(B, H, S, D)
-    #     x_flat = x_exp.reshape(B * H * S, D)
-    #     assignments_flat = assignments.reshape(B * H * S)
-    #     head_indices = torch.arange(H, device=device).repeat_interleave(S).repeat(B)
-    #     cluster_indices = assignments_flat
-
-    #     W_selected = W[head_indices, cluster_indices]  # (B*H*S, D, head_dim)
-    #     b_selected = b[head_indices, cluster_indices]  # (B*H*S, head_dim)
-
-    #     transformed = torch.einsum('bd,bdo->bo', x_flat, W_selected)
-    #     transformed = transformed + b_selected
-    #     transformed = self.activation(transformed)
-    #     transformed = self.dropout(transformed)
-
-    #     output = transformed.reshape(B, H, S, self.head_dim)
-    #     return output
 
     def apply_experts_batch(self, x, assignments, is_query=True):
         B, S, D = x.shape
@@ -591,7 +571,6 @@ class MoEClusteredAttention(nn.Module):
         Dh = self.head_dim
         device = x.device
 
-        # 选择专家参数（与第一个版本相同）
         if self.shared_experts:
             W_full = self.experts_weight   # (H, M, D, Dh)
             b_full = self.experts_bias     # (H, M, Dh)
@@ -606,8 +585,12 @@ class MoEClusteredAttention(nn.Module):
         # 使用与第一个版本相同的张量形状
         x_exp = x.unsqueeze(1).expand(B, H, S, D)  # (B, H, S, D)
         x_flat = x_exp.reshape(B * H * S, D)       # (B*H*S, D)
+        if not is_query:
+            pass
+            # print(assignments.shape)
+            # print(B,H,S)
         assignments_flat = assignments.reshape(B * H * S)  # (B*H*S,)
-        
+
         output_flat = torch.zeros(B * H * S, Dh, dtype=x.dtype, device=device)
 
         # 遍历每个专家
@@ -636,6 +619,7 @@ class MoEClusteredAttention(nn.Module):
                 transformed = self.activation(transformed)
                 transformed = self.dropout(transformed)
                 output_flat[indices] = transformed
+        
 
         # 重塑回原始形状
         output = output_flat.reshape(B, H, S, Dh)
@@ -649,8 +633,12 @@ class MoEClusteredAttention(nn.Module):
         device = Q.device
 
         Q_exp = Q.unsqueeze(1).expand(B, H, Sq, D)
-        K_exp = K.unsqueeze(1).expand(B, H, Sk, D)
+        K_exp = K.unsqueeze(1).expand(-1, H, Sk, D)
+        # exit()
         
+        # if self.use_learnable_text_emb:
+        #     K_exp = K_exp[0:B, :, :, :]
+
         if self.shared_router:
             if self.configs.is_debugging:
                 print("miu stats:", self.miu.min().item(), self.miu.max().item(), self.miu.isnan().sum().item())
@@ -1127,6 +1115,7 @@ class MoEClusteredAttention(nn.Module):
         H = self.num_heads
         M = self.M
         device = Q.device
+
         # print("QK")
         # print(Q.shape)
         # print(K.shape)
@@ -1135,6 +1124,38 @@ class MoEClusteredAttention(nn.Module):
             nan_debugging_report(Q, "init_Q")
             print("miu_Q stats0:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
             print("miu_K stats0:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
+
+        orig_dtype = Q.dtype
+        if self.use_triton:
+            # 🔥 T4 硬件保命符：强行洗成 float16 并刷为连续内存 (Contiguous)
+            # 只有严格的 FP16 才能激活 T4 的 Tensor Core MMA 指令，绕过 LLVM 崩溃
+            compute_dtype = torch.float16
+            
+            Q_triton = Q.to(compute_dtype).contiguous()
+            K_triton = K.to(compute_dtype).contiguous()
+
+            # 动态获取权重，并全部对齐到 float16
+            rq = (self.miu.squeeze(0) if self.shared_router else self.miu_Q.squeeze(0)).to(compute_dtype).contiguous()
+            rk = (self.miu.squeeze(0) if self.shared_router else self.miu_K.squeeze(0)).to(compute_dtype).contiguous()
+
+            eq = (self.experts_weight if self.shared_experts else self.experts_Q_weight).transpose(0, 1).to(compute_dtype).contiguous() 
+            ek = (self.experts_weight if self.shared_experts else self.experts_K_weight).transpose(0, 1).to(compute_dtype).contiguous() 
+
+            w_v_weight = self.V_weight.to(compute_dtype).contiguous()
+
+            # 调用 Triton Autograd
+            O = FinalCrossMoEMultiHeadAttentionFunc.apply(
+                Q_triton, K_triton, rq, rk, eq, ek, w_v_weight, self.H, self.num_splits
+            )
+
+            # 🔥 算完之后，立刻洗回原精度，不干扰大模型的后续网络
+            O = O.to(orig_dtype)
+            
+            O = self.output_projection(O)
+            assignments, router_logits = self.assign_clusters(Q, K)
+            balance_loss = self.compute_balance_loss(router_logits, assignments)
+            return O + Q, balance_loss
+
 
         assignments, router_logits = self.assign_clusters(Q, K)
 
@@ -1156,20 +1177,22 @@ class MoEClusteredAttention(nn.Module):
                         assignments=assignments,
                         M=self.M
                     )
+            
         if self.configs.is_debugging:
             print("miu_Q stats2:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
             print("miu_K stats2:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
 
         # Step 2: 专家变换（支持共享/非共享 experts）
-        Q_prime = self.apply_experts_batch(Q, assignments[:, :, :Sq], is_query=True)
         K_prime = self.apply_experts_batch(K, assignments[:, :, Sq:], is_query=False)
+        Q_prime = self.apply_experts_batch(Q, assignments[:, :, :Sq], is_query=True)
         V_prime = K_prime
-        
+
         if self.configs.is_debugging:
             print("miu_Q stats3:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
             print("miu_K stats3:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
         
         O, attention_weights = self.generate_clustered_attention_fast(Q_prime, K_prime, V_prime, assignments)
+
         if self.configs.is_debugging:
             nan_debugging_report(O, "clustered_attention_O")
 
@@ -1203,10 +1226,10 @@ class MoEClusteredAttention(nn.Module):
             print("Warning: balance_loss is NaN or Inf!")
             print(balance_loss)
 
-
         if self.configs.is_debugging:
             print("-------------------------")
             nan_debugging_report(O, "final_O")
+            
         return O+Q, balance_loss
 
     def finalize_statistics(self, experiment_name: str = None):

@@ -1,0 +1,650 @@
+[
+    {
+        "timestamp": 1775672260.94053,
+        "qps": 17,
+        "avg_latency": 226.70281634611243,
+        "p95_latency": 282.22928047180176,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672262.6698918,
+        "qps": 320,
+        "avg_latency": 1255.074369162321,
+        "p95_latency": 1727.7786254882812,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672263.8001838,
+        "qps": 255,
+        "avg_latency": 2214.9382881089755,
+        "p95_latency": 2651.070261001587,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672264.9623642,
+        "qps": 192,
+        "avg_latency": 2393.5448651512465,
+        "p95_latency": 2505.5468797683716,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672266.4553185,
+        "qps": 320,
+        "avg_latency": 2559.411969780922,
+        "p95_latency": 2975.0327587127686,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672267.6752877,
+        "qps": 255,
+        "avg_latency": 2334.9634226630715,
+        "p95_latency": 2617.6395416259766,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672268.6808662,
+        "qps": 192,
+        "avg_latency": 2400.1613035798073,
+        "p95_latency": 2527.934670448303,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672269.8103511,
+        "qps": 255,
+        "avg_latency": 2441.5674377890196,
+        "p95_latency": 2560.01718044281,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672270.9637222,
+        "qps": 192,
+        "avg_latency": 2442.209525654713,
+        "p95_latency": 2526.799738407135,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672272.2469597,
+        "qps": 255,
+        "avg_latency": 2488.703451904596,
+        "p95_latency": 2753.709363937378,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672274.208972,
+        "qps": 448,
+        "avg_latency": 2695.3067369759083,
+        "p95_latency": 3453.6699175834656,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672275.3520093,
+        "qps": 192,
+        "avg_latency": 1833.5719928145409,
+        "p95_latency": 2493.5006618499756,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672276.5225518,
+        "qps": 255,
+        "avg_latency": 2354.705919938929,
+        "p95_latency": 2501.8450498580933,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672278.0058668,
+        "qps": 320,
+        "avg_latency": 2493.9591333270073,
+        "p95_latency": 2844.10982131958,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672279.2418404,
+        "qps": 245,
+        "avg_latency": 2349.1833054289527,
+        "p95_latency": 2515.8809185028076,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672280.3493898,
+        "qps": 192,
+        "avg_latency": 2439.680470774571,
+        "p95_latency": 2516.84912443161,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672281.3541305,
+        "qps": 192,
+        "avg_latency": 2446.5562514960766,
+        "p95_latency": 2517.4116253852844,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672282.5432763,
+        "qps": 255,
+        "avg_latency": 2472.622502083872,
+        "p95_latency": 2635.5525732040405,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672283.7354443,
+        "qps": 207,
+        "avg_latency": 2419.293182483618,
+        "p95_latency": 2500.1478910446167,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672285.1046045,
+        "qps": 256,
+        "avg_latency": 2450.9488278999925,
+        "p95_latency": 2536.8712544441223,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672286.3112183,
+        "qps": 256,
+        "avg_latency": 2450.4345767199993,
+        "p95_latency": 2579.0640115737915,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672288.5716705,
+        "qps": 448,
+        "avg_latency": 2785.4556856410845,
+        "p95_latency": 3444.4387435913086,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672290.0397596,
+        "qps": 320,
+        "avg_latency": 1961.4321544766426,
+        "p95_latency": 2884.8113775253296,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672291.0436075,
+        "qps": 192,
+        "avg_latency": 2419.1346069176993,
+        "p95_latency": 2525.280797481537,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672292.6296413,
+        "qps": 320,
+        "avg_latency": 2455.641905963421,
+        "p95_latency": 2535.6287956237793,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672293.8527768,
+        "qps": 255,
+        "avg_latency": 2337.609895070394,
+        "p95_latency": 2603.381586074829,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672295.4761136,
+        "qps": 320,
+        "avg_latency": 2521.8373335897923,
+        "p95_latency": 2801.7603278160095,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672297.083843,
+        "qps": 320,
+        "avg_latency": 2420.968396961689,
+        "p95_latency": 2997.0914602279663,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672298.0872004,
+        "qps": 192,
+        "avg_latency": 2414.32307412227,
+        "p95_latency": 2521.647357940674,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672299.4588294,
+        "qps": 320,
+        "avg_latency": 2388.1355591118336,
+        "p95_latency": 2504.7380566596985,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672300.7711172,
+        "qps": 256,
+        "avg_latency": 2359.6582552418113,
+        "p95_latency": 2576.278269290924,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672303.049943,
+        "qps": 448,
+        "avg_latency": 2788.1385018782958,
+        "p95_latency": 3540.2870059013367,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672304.218692,
+        "qps": 255,
+        "avg_latency": 1797.7697409835516,
+        "p95_latency": 2566.1590576171875,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672305.513312,
+        "qps": 256,
+        "avg_latency": 2412.5043330714107,
+        "p95_latency": 2516.086459159851,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672306.7187665,
+        "qps": 256,
+        "avg_latency": 2424.4365599006414,
+        "p95_latency": 2502.179503440857,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672307.8878648,
+        "qps": 256,
+        "avg_latency": 2391.041954047978,
+        "p95_latency": 2479.516863822937,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672309.5761635,
+        "qps": 320,
+        "avg_latency": 2506.6080152988434,
+        "p95_latency": 2836.145043373108,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672310.6886394,
+        "qps": 256,
+        "avg_latency": 2290.9949338063598,
+        "p95_latency": 2470.8845019340515,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672311.9359264,
+        "qps": 256,
+        "avg_latency": 2371.0044184699655,
+        "p95_latency": 2474.062144756317,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672313.2439373,
+        "qps": 256,
+        "avg_latency": 2414.7939523682,
+        "p95_latency": 2529.4326543807983,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672314.4975853,
+        "qps": 255,
+        "avg_latency": 2359.223797742058,
+        "p95_latency": 2514.135956764221,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672315.519393,
+        "qps": 192,
+        "avg_latency": 2414.867617189884,
+        "p95_latency": 2494.246506690979,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672317.0281754,
+        "qps": 320,
+        "avg_latency": 2500.024738162756,
+        "p95_latency": 2860.4443192481995,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672318.2278595,
+        "qps": 255,
+        "avg_latency": 2299.7403247683656,
+        "p95_latency": 2489.2712593078613,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672319.2357726,
+        "qps": 192,
+        "avg_latency": 2379.0692823628583,
+        "p95_latency": 2472.042965888977,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672320.3998067,
+        "qps": 256,
+        "avg_latency": 2406.8766087293625,
+        "p95_latency": 2492.6384687423706,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672321.545781,
+        "qps": 192,
+        "avg_latency": 2415.2209709088006,
+        "p95_latency": 2479.139494895935,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672322.80721,
+        "qps": 256,
+        "avg_latency": 2458.790350705385,
+        "p95_latency": 2715.021550655365,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672324.7974963,
+        "qps": 448,
+        "avg_latency": 2688.354812030281,
+        "p95_latency": 3450.412428379059,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672326.9065185,
+        "qps": 404,
+        "avg_latency": 2223.2320438517204,
+        "p95_latency": 2474.713408946991,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672327.9569032,
+        "qps": 192,
+        "avg_latency": 1869.4534040987492,
+        "p95_latency": 2475.5801677703857,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672329.2116477,
+        "qps": 255,
+        "avg_latency": 2364.9399065503885,
+        "p95_latency": 2477.3926734924316,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672330.574262,
+        "qps": 256,
+        "avg_latency": 2450.632318854332,
+        "p95_latency": 2618.6150312423706,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672332.6162188,
+        "qps": 448,
+        "avg_latency": 2681.6859782806464,
+        "p95_latency": 3379.6466588974,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672333.6723466,
+        "qps": 192,
+        "avg_latency": 1740.9176528453827,
+        "p95_latency": 2432.6837182044983,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672334.9548488,
+        "qps": 276,
+        "avg_latency": 2330.016553401947,
+        "p95_latency": 2432.7866435050964,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672336.3051767,
+        "qps": 256,
+        "avg_latency": 2334.332199767232,
+        "p95_latency": 2525.8554816246033,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672337.556028,
+        "qps": 255,
+        "avg_latency": 2356.5346222297817,
+        "p95_latency": 2547.112464904785,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672338.774804,
+        "qps": 256,
+        "avg_latency": 2370.3677030280232,
+        "p95_latency": 2442.601263523102,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672340.005159,
+        "qps": 256,
+        "avg_latency": 2373.2242807745934,
+        "p95_latency": 2443.355679512024,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672341.010571,
+        "qps": 192,
+        "avg_latency": 2340.686680128177,
+        "p95_latency": 2431.9886922836304,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672342.2074866,
+        "qps": 256,
+        "avg_latency": 2383.964406326413,
+        "p95_latency": 2597.060739994049,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672344.115209,
+        "qps": 384,
+        "avg_latency": 2640.76754078269,
+        "p95_latency": 3280.0698280334473,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672345.1335032,
+        "qps": 256,
+        "avg_latency": 2043.745355680585,
+        "p95_latency": 2481.9544553756714,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672346.372926,
+        "qps": 256,
+        "avg_latency": 2371.004220098257,
+        "p95_latency": 2498.7714886665344,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672347.5439613,
+        "qps": 192,
+        "avg_latency": 2403.888846437136,
+        "p95_latency": 2480.60622215271,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672348.5721922,
+        "qps": 256,
+        "avg_latency": 2411.8561409413815,
+        "p95_latency": 2480.1872968673706,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672349.575693,
+        "qps": 192,
+        "avg_latency": 2369.169191767772,
+        "p95_latency": 2480.393397808075,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672350.903031,
+        "qps": 255,
+        "avg_latency": 2448.2597154729506,
+        "p95_latency": 2604.582452774048,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672351.9071224,
+        "qps": 192,
+        "avg_latency": 2414.074081927538,
+        "p95_latency": 2476.8513202667236,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672353.2833982,
+        "qps": 180,
+        "avg_latency": 2477.8495616383025,
+        "p95_latency": 2798.7020611763,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    },
+    {
+        "timestamp": 1775672354.500757,
+        "qps": 0,
+        "avg_latency": 0.0,
+        "p95_latency": 0.0,
+        "gpu_mem_pct": 81.91,
+        "physical_used_mb": 26709.69,
+        "tensor_allocated_mb": 12559.42
+    }
+]

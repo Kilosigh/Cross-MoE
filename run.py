@@ -183,6 +183,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_Unified_model', type=int, default=0)
     parser.add_argument('--output_routing', type=int, default=0, help='whether outputs the routing distribution of MoE net')
     parser.add_argument('--balance_coeff', type=float, default=0.1)
+    parser.add_argument('--use_learnable_text_emb', type=int, default=0)
 
     # MoE_Attn
     parser.add_argument('--shared_router', type=int, default=0)
@@ -249,8 +250,9 @@ if __name__ == '__main__':
     args.sampler = None
 
 
-    if(args.mix_type == 2):
-        args.d_model = args.llm_dim
+    # if(args.mix_type == 2):
+    #     args.d_model = args.llm_dim
+
 
     if args.features == 'S':
         args.enc_in = 1

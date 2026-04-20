@@ -27,10 +27,13 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.configs = configs
         self.task_name = configs.task_name
-        self.seq_len = configs.seq_len
+        self.text_len = 512
         self.label_len = configs.label_len
         self.pred_len = configs.pred_len
         self.device = configs.device
+        self.d_model = configs.d_model
+        self.batch_size = configs.batch_size
+        self.use_learnable_text_emb = configs.use_learnable_text_emb
 
         if configs.patch_len > configs.pred_len:
             configs.patch_len = configs.pred_len
@@ -50,6 +53,11 @@ class Model(nn.Module):
         self.enc_embedding = self.ts_model.enc_embedding
 
         self.encoder = self.ts_model.encoder
+
+        self.text_projector = None
+        if configs.d_model != configs.llm_dim:
+            self.text_projector = nn.Linear(configs.llm_dim, configs.d_model)
+            nn.init.xavier_normal_(self.text_projector.weight)
 
         if hasattr(self.ts_model, 'head'):
             self.head = self.ts_model.head
@@ -146,6 +154,9 @@ class Model(nn.Module):
         
         self.mix_type = configs.mix_type
 
+        if self.use_learnable_text_emb:
+            self.learnable_text_embedding = nn.Parameter(torch.randn(1, self.text_len, self.d_model))
+
         if self.mix_type == 2 and configs.use_k_means_init:
             normalized_path = os.path.normpath(configs.root_path)
             dataset = os.path.basename(normalized_path)
@@ -208,37 +219,56 @@ class Model(nn.Module):
 
 
     def text_encoder(self, text, ts_embedding):
-        # text = [t for t in text]
-        text = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in text]
-        token = self.stage_1_model.tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-        tokens = self.stage_1_model.tokenizer.convert_ids_to_tokens(token['input_ids'][0])
-        # text_embedding = self.llm_model.get_input_embeddings()(token.to(self.device))  # (batch, token, dim)
-        text_embedding = self.stage_1_model.text_encoder(**token.to(self.device)).last_hidden_state
-        aux_loss_tx = 0
-        scores_avg_saved = None
-        # print(text_embedding.shape)
-        # print("nn")
+            aux_loss_tx = 0
+            scores_avg_saved = None
+            B = ts_embedding.shape[0]
+            # 1. 检查是否使用可学习的嵌入向量替代文本
+            if self.use_learnable_text_emb:
+                # 获取当前的 batch size
+                text_embedding = self.learnable_text_embedding.expand(B, -1, -1)
+                # text_embedding = self.learnable_text_embedding
+                tokens = None 
+                all_special_tokens = self.stage_1_model.tokenizer.all_special_tokens
+                
+            else:
+                # 2. 原有的文本分词与编码逻辑
+                text = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in text]
+                token = self.stage_1_model.tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+                tokens = self.stage_1_model.tokenizer.convert_ids_to_tokens(token['input_ids'][0])
+                # (batch, token, dim)
+                text_embedding = self.stage_1_model.text_encoder(**token.to(self.device)).last_hidden_state
+                all_special_tokens = self.stage_1_model.tokenizer.all_special_tokens
+            
 
-        # print(f"text_embedding.shape:{text_embedding.shape}")
-        if self.use_tx_moe and self.configs.mix_type != 2:
-            text_embedding, aux_loss_tx = self.tx_moe(text_embedding)
-            text_embedding = self.moe_tx_dropout(text_embedding)
-        if text_embedding.shape[-1] == self.configs.llm_dim and self.configs.mix_type != 2:  
-            text_embedding = self.stage_1_model.text_mlp(text_embedding)
-        if self.configs.use_Cross_ranker:
-            text_embedding, scores_avg_saved = self.stage_1_model.cross(ts_embedding, text_embedding)
-        ret = {
-            "text_embedding" : text_embedding,
-            "tokens" : tokens,
-            "all_special_tokens" : self.stage_1_model.tokenizer.all_special_tokens
-        }
-        if aux_loss_tx != 0: 
-            ret["aux_loss_tx"] = aux_loss_tx
+            if self.text_projector is not None and not  self.use_learnable_text_emb:
+                text_embedding = self.text_projector(text_embedding)
+                print(text_embedding.shape)
 
-        if scores_avg_saved is not None: 
-            ret["scores_avg_saved"] = scores_avg_saved
-        # return text_embedding, aux_loss_tx, scores_avg_saved, tokens, self.stage_1_model.tokenizer.all_special_tokens
-        return ret
+            # 3. 后续的特征变换逻辑（MoE, MLP, Cross-ranker 保持不变）
+            if self.use_tx_moe and self.configs.mix_type != 2:
+                text_embedding, aux_loss_tx = self.tx_moe(text_embedding)
+                text_embedding = self.moe_tx_dropout(text_embedding)
+                
+            if text_embedding.shape[-1] == self.configs.llm_dim and self.configs.mix_type != 2:  
+                text_embedding = self.stage_1_model.text_mlp(text_embedding)
+                
+            if self.configs.use_Cross_ranker:
+                text_embedding, scores_avg_saved = self.stage_1_model.cross(ts_embedding, text_embedding)
+                
+            # 4. 封装返回结果
+            ret = {
+                "text_embedding" : text_embedding,
+                "tokens" : tokens,
+                "all_special_tokens" : all_special_tokens
+            }
+            
+            if aux_loss_tx != 0: 
+                ret["aux_loss_tx"] = aux_loss_tx
+
+            if scores_avg_saved is not None: 
+                ret["scores_avg_saved"] = scores_avg_saved
+                
+            return ret
 
     def data_manage_enc_out(self, enc_out, n_vars, pred_len):
         if self.model_name == "PatchTST" or self.model_name == "TimeXer":
@@ -275,6 +305,7 @@ class Model(nn.Module):
 
 
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec, text, batch_idx):
+
         # Normalization from Non-stationary Transformer
         means = x_enc.mean(1, keepdim=True).detach()
         x_enc = x_enc - means
@@ -295,7 +326,6 @@ class Model(nn.Module):
         # z: [bs * nvars x patch_num x d_model]
         
         enc_out, attns = self.encoder(enc_out, x_mark_enc)
-
         # print(enc_out.shape)
 
         aux_loss = 0
@@ -305,6 +335,7 @@ class Model(nn.Module):
             aux_loss += aux_loss_ts
 
         enc_out = self.data_manage_enc_out(enc_out, n_vars, self.pred_len)
+
 
         # Text Embedding
         # text_embedding, aux_loss_tx, scores_avg_saved, tokens, special_tokens = self.text_encoder(text, enc_out)
@@ -321,7 +352,9 @@ class Model(nn.Module):
         # print(f"enc_out.shape{enc_out.shape}")
         # print(f"text_embedding.shape{text_embedding.shape}")
         enc_out, aux_loss_ = self.mixer(enc_out, text_embedding, batch_idx) 
-        aux_loss += aux_loss_ 
+        aux_loss += aux_loss_
+
+        
 
         if self.configs.is_debugging:
             nan_debugging_report(enc_out, "after_mixer")

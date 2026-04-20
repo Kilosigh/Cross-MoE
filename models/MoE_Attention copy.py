@@ -9,51 +9,58 @@ import seaborn as sns  # 用于美化图表
 import os
 from visualization.tSNE import TSNEVisualizer
 from visualization.attn_heat_map import AttentionHeatmapVisualizer
+from utils.tools import nan_debugging_report
 from typing import Dict, Optional
 import time
 
+import json
+import torch
+from typing import Dict
+from pathlib import Path
+
 class AttentionStatistics:
-    """轻量级注意力统计类，可集成到MoEClusteredAttention中"""
+    """集成在MoE-ATTN网络模块中的FLOPs统计类"""
     
-    def __init__(self, enabled: bool = True):
+    def __init__(self, output_dir: str = "./moe_attn_stats", enabled: bool = True):
         self.enabled = enabled
+        self.output_dir = Path(output_dir)
+        self.output_dir_batch = self.output_dir / "batch_wise_info/"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir_batch.mkdir(parents=True, exist_ok=True)
+        
+        # 重置统计
         self.reset_stats()
     
     def reset_stats(self):
-        """重置统计数据"""
+        """重置所有统计"""
         self.stats = {
             'total_batches': 0,
             'total_qk_flops': 0,
             'total_native_flops': 0,
             'total_connections': 0,
             'total_theoretical_connections': 0,
-            'avg_sparsity': 0,
-            'cluster_utilization': [],
-            'time_measurements': {
-                'routing': [],
-                'expert_forward': [],
-                'attention': []
-            }
+            'batch_details': []  # 存储每个batch的详细信息
         }
     
-    def update_qk_stats(self, 
+    def update_qk_stats(self,
+                       batch_id: int,
                        batch_size: int,
-                       seq_len_q: int,
-                       seq_len_k: int,
+                       Sq: int,
+                       Sk: int,
                        d_model: int,
                        assignments: torch.Tensor,
                        M: int):
-        """更新QK计算统计"""
+        """更新QK计算统计并保存当前batch信息"""
         if not self.enabled:
             return
         
-        query_assignments = assignments[:, :seq_len_q]
-        key_assignments = assignments[:, seq_len_q:seq_len_q + seq_len_k]
+        query_assignments = assignments[:, :Sq]
+        key_assignments = assignments[:, Sq:Sq + Sk]
         
         # 计算MoE QK FLOPs
         moe_flops = 0
         connections = 0
-        cluster_sizes = []
+        active_clusters = 0
         
         for b in range(batch_size):
             for m in range(M):
@@ -64,56 +71,102 @@ class AttentionStatistics:
                     # QK^T的FLOPs: q_count * k_count * (2 * d_model - 1)
                     moe_flops += q_count * k_count * (2 * d_model - 1)
                     connections += q_count * k_count
-                    cluster_sizes.append((q_count, k_count))
+                    active_clusters += 1
         
         # 计算Native QK FLOPs
-        native_flops = batch_size * seq_len_q * seq_len_k * (2 * d_model - 1)
-        theoretical_connections = batch_size * seq_len_q * seq_len_k
+        native_flops = batch_size * Sq * Sk * (2 * d_model - 1)
+        theoretical_connections = batch_size * Sq * Sk
         
-        # 更新统计
+        # 当前batch的统计
+        batch_stats = {
+            'batch_id': batch_id,
+            'batch_size': batch_size,
+            'Sq': Sq,
+            'Sk': Sk,
+            'd_model': d_model,
+            'num_clusters': M,
+            'moe_qk_flops': moe_flops,
+            'native_qk_flops': native_flops,
+            'actual_connections': connections,
+            'theoretical_connections': theoretical_connections,
+            'sparsity': 1 - (connections / theoretical_connections) if theoretical_connections > 0 else 1.0,
+            'flops_reduction': 1 - (moe_flops / native_flops) if native_flops > 0 else 0,
+            'cluster_utilization': active_clusters / (batch_size * M) if M > 0 else 0
+        }
+        
+        # 更新累计统计
         self.stats['total_batches'] += 1
         self.stats['total_qk_flops'] += moe_flops
         self.stats['total_native_flops'] += native_flops
         self.stats['total_connections'] += connections
         self.stats['total_theoretical_connections'] += theoretical_connections
+        self.stats['batch_details'].append(batch_stats)
         
-        # 更新平均稀疏度
-        current_sparsity = 1 - (connections / theoretical_connections)
-        self.stats['avg_sparsity'] = (
-            (self.stats['avg_sparsity'] * (self.stats['total_batches'] - 1) + current_sparsity) 
-            / self.stats['total_batches']
-        )
-        
-        # 记录簇利用率
-        utilization = len(cluster_sizes) / M
-        self.stats['cluster_utilization'].append(utilization)
+        # 立即保存当前batch统计到文件
+        self._save_batch_stats(batch_stats)
     
-    def add_time_measurement(self, category: str, time_ms: float):
-        """添加时间测量"""
-        if not self.enabled:
+    def _save_batch_stats(self, batch_stats: Dict):
+        """保存单个batch的统计到文件"""
+        batch_file = self.output_dir_batch / f"batch_{batch_stats['batch_id']:06d}.json"
+        with open(batch_file, 'w', encoding='utf-8') as f:
+            json.dump(batch_stats, f, indent=2, ensure_ascii=False)
+    
+    def save_final_summary(self, experiment_name: str = "moe_attn_experiment"):
+        """保存最终汇总统计（在训练/测试结束时手动调用）"""
+        if not self.enabled or self.stats['total_batches'] == 0:
             return
-        if category in self.stats['time_measurements']:
-            self.stats['time_measurements'][category].append(time_ms)
+        
+        summary = self.get_summary()
+        summary['experiment_name'] = experiment_name
+        
+        # 保存汇总文件
+        summary_file = self.output_dir / f"{experiment_name}_summary.json"
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+        
+        # 保存详细的batch信息（可选，用于后续分析）
+        details_file = self.output_dir / f"{experiment_name}_batch_details.json"
+        with open(details_file, 'w', encoding='utf-8') as f:
+            json.dump(self.stats['batch_details'], f, indent=2, ensure_ascii=False)
+        
+        print(f"MoE Attention statistics saved to:")
+        print(f"  - Summary: {summary_file}")
+        print(f"  - Batch details: {details_file}")
+        
+        return summary
     
     def get_summary(self) -> Dict:
         """获取统计摘要"""
         if not self.enabled or self.stats['total_batches'] == 0:
             return {}
         
-        summary = {
-            'total_batches': self.stats['total_batches'],
-            'qk_flops_reduction': 1 - (self.stats['total_qk_flops'] / self.stats['total_native_flops']),
-            'average_sparsity': self.stats['avg_sparsity'],
-            'connection_ratio': self.stats['total_connections'] / self.stats['total_theoretical_connections'],
-            'avg_cluster_utilization': sum(self.stats['cluster_utilization']) / len(self.stats['cluster_utilization'])
-                if self.stats['cluster_utilization'] else 0,
-            'total_qk_gflops_saved': (self.stats['total_native_flops'] - self.stats['total_qk_flops']) / 1e9,
-        }
+        total_batches = self.stats['total_batches']
         
-        # 添加时间统计
-        for category, times in self.stats['time_measurements'].items():
-            if times:
-                summary[f'avg_{category}_time_ms'] = sum(times) / len(times)
+        # 计算各种比率
+        qk_flops_reduction = 1 - (self.stats['total_qk_flops'] / 
+                                self.stats['total_native_flops'])
+        
+        avg_sparsity = 1 - (self.stats['total_connections'] / 
+                          self.stats['total_theoretical_connections'])
+        
+        connection_ratio = (self.stats['total_connections'] / 
+                          self.stats['total_theoretical_connections'])
+        
+        # 计算平均簇利用率（从所有batch中计算）
+        utilizations = [batch['cluster_utilization'] for batch in self.stats['batch_details']]
+        avg_cluster_utilization = sum(utilizations) / len(utilizations) if utilizations else 0
+        
+        summary = {
+            'total_batches': total_batches,
+            'qk_flops_reduction': qk_flops_reduction,
+            'average_sparsity': avg_sparsity,
+            'connection_ratio': connection_ratio,
+            'average_cluster_utilization': avg_cluster_utilization,
+            'total_qk_gflops_saved': (self.stats['total_native_flops'] - 
+                                    self.stats['total_qk_flops']) / 1e9,
+            'total_moe_qk_gflops': self.stats['total_qk_flops'] / 1e9,
+            'total_native_qk_gflops': self.stats['total_native_flops'] / 1e9,
+        }
         
         return summary
     
@@ -125,22 +178,16 @@ class AttentionStatistics:
             return
         
         print("\n" + "="*60)
-        print("MoE ATTENTION QK COMPUTATION STATISTICS")
+        print("MoE ATTENTION FLOPs STATISTICS")
         print("="*60)
         print(f"Total Batches Processed: {summary['total_batches']}")
         print(f"QK FLOPs Reduction: {summary['qk_flops_reduction']:.1%}")
         print(f"Average Sparsity: {summary['average_sparsity']:.1%}")
         print(f"Connection Ratio: {summary['connection_ratio']:.3f}")
-        print(f"Average Cluster Utilization: {summary['avg_cluster_utilization']:.1%}")
+        print(f"Average Cluster Utilization: {summary['average_cluster_utilization']:.1%}")
         print(f"Total QK GFLOPs Saved: {summary['total_qk_gflops_saved']:.2f}")
-        
-        # 打印时间统计
-        if 'avg_routing_time_ms' in summary:
-            print(f"\nTiming Statistics:")
-            for key, value in summary.items():
-                if 'time_ms' in key:
-                    category = key.replace('avg_', '').replace('_time_ms', '')
-                    print(f"  Average {category} time: {value:.2f} ms")
+        print(f"Total MoE QK GFLOPs: {summary['total_moe_qk_gflops']:.2f}")
+        print(f"Total Native QK GFLOPs: {summary['total_native_qk_gflops']:.2f}")
         print("="*60 + "\n")
 
 class ClusterTokenStatistics:
@@ -155,20 +202,20 @@ class ClusterTokenStatistics:
         self.batch_stats = []  # 存储每个batch的统计
         self.total_batches = 0
         
-    def update(self, assignments: torch.Tensor, seq_len_q: int, seq_len_k: int):
+    def update(self, assignments: torch.Tensor, Sq: int, Sk: int):
         """
         更新单个batch的统计
         
         Args:
-            assignments: [batch_size, seq_len_q + seq_len_k] 簇分配
-            seq_len_q: 查询序列长度
-            seq_len_k: 键序列长度
+            assignments: [batch_size, Sq + Sk] 簇分配
+            Sq: 查询序列长度
+            Sk: 键序列长度
         """
         batch_size = assignments.shape[0]
         
         # 分离Q和K的分配
-        query_assignments = assignments[:, :seq_len_q]  # [batch_size, seq_len_q]
-        key_assignments = assignments[:, seq_len_q:seq_len_q + seq_len_k]  # [batch_size, seq_len_k]
+        query_assignments = assignments[:, :Sq]  # [batch_size, Sq]
+        key_assignments = assignments[:, Sq:Sq + Sk]  # [batch_size, Sk]
         
         # 统计每个batch中每个簇的Q和K token数量
         batch_cluster_stats = []
@@ -182,15 +229,15 @@ class ClusterTokenStatistics:
                     'q_tokens': q_count,
                     'k_tokens': k_count,
                     'total_tokens': q_count + k_count,
-                    'q_ratio': q_count / seq_len_q if seq_len_q > 0 else 0,
-                    'k_ratio': k_count / seq_len_k if seq_len_k > 0 else 0
+                    'q_ratio': q_count / Sq if Sq > 0 else 0,
+                    'k_ratio': k_count / Sk if Sk > 0 else 0
                 }
             batch_cluster_stats.append(cluster_info)
         
         self.batch_stats.append({
             'batch_size': batch_size,
-            'seq_len_q': seq_len_q,
-            'seq_len_k': seq_len_k,
+            'Sq': Sq,
+            'Sk': Sk,
             'cluster_stats': batch_cluster_stats,
             'timestamp': time.time()
         })
@@ -207,8 +254,8 @@ class ClusterTokenStatistics:
         summary = {
             'batch_index': self.total_batches - 1,
             'batch_size': latest['batch_size'],
-            'seq_len_q': latest['seq_len_q'],
-            'seq_len_k': latest['seq_len_k'],
+            'Sq': latest['Sq'],
+            'Sk': latest['Sk'],
             'clusters': {}
         }
         
@@ -273,7 +320,7 @@ class ClusterTokenStatistics:
         print("\n" + "="*80)
         print(f"BATCH {self.total_batches + batch_idx if batch_idx < 0 else batch_idx} TOKEN DISTRIBUTION")
         print("="*80)
-        print(f"Batch Size: {batch_data['batch_size']}, Seq Len Q: {batch_data['seq_len_q']}, Seq Len K: {batch_data['seq_len_k']}")
+        print(f"Batch Size: {batch_data['batch_size']}, Seq Len Q: {batch_data['Sq']}, Seq Len K: {batch_data['Sk']}")
         print("-"*80)
         
         # 打印每个样本的详细分布
@@ -374,7 +421,7 @@ class ClusterTokenStatistics:
 
 class MoEClusteredAttention(nn.Module):
     def __init__(self, configs, d_model, num_clusters, update_weight, 
-                 init_data=None, expert_hidden_dim=None, 
+                 init_data=None, num_heads=1, expert_hidden_dim=None, 
                  kmeans_n_init=10, kmeans_max_iter=300,
                  use_trainable_center=False, enable_token_stats=True):
         """
@@ -391,54 +438,91 @@ class MoEClusteredAttention(nn.Module):
         self.tsne_path = None
 
         self.d_model = d_model
+        self.head_dim = d_model
         self.M = num_clusters
         self.lambda_ = update_weight
         self.use_trainable_center = use_trainable_center
-            
-        # 根据配置选择簇核心初始化方式
-        if use_trainable_center:
-            # 作为可训练参数
-            self.miu = nn.Parameter(torch.empty(num_clusters, d_model))
-        else:
-            # 作为缓冲区（不可训练）
-            self.register_buffer('miu', torch.empty(num_clusters, d_model))
-        
+        self.num_heads = num_heads
+        self.use_learnable_text_emb = configs.use_learnable_text_emb
+
+        self.activation = nn.GELU()
+        self.dropout = nn.Dropout(0.1)
+
+        self.shared_router = getattr(configs, 'shared_router', True)  # 默认共享router
+        self.shared_experts = getattr(configs, 'shared_experts', False)  # 默认不共享专家组
+
+        self.stats = AttentionStatistics(output_dir=f"./attn_results/MoE_attn/overhead/{configs.model}/num_tx_experts_{configs.num_tx_experts}/")
+
         self.enable_token_stats = enable_token_stats
-        if enable_token_stats:
+        if self.enable_token_stats:
             self.token_stats = ClusterTokenStatistics(num_clusters)
             print(f"  - Token统计: 已启用")
             
         # 设置专家网络隐藏层维度
-        expert_hidden_dim = expert_hidden_dim or 4 * d_model
+        # expert_hidden_dim = expert_hidden_dim or 4 * d_model
+
+        expert_hidden_dim = d_model
         
-        # 初始化查询专家网络
-        self.experts_Q = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(d_model, d_model),
-                nn.GELU(),
-                nn.Dropout(0.1)
-                # nn.Linear(expert_hidden_dim, d_model)
-            ) for _ in range(num_clusters)
-        ])
-        
-        # 初始化键专家网络
-        self.experts_K = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(d_model, d_model),
-                nn.GELU(),
-                nn.Dropout(0.1)
-                # nn.Linear(expert_hidden_dim, d_model)
-            ) for _ in range(num_clusters)
-        ])
+        # ----------------------------
+        # Router (miu) 参数
+        # ----------------------------
+        if self.shared_router:
+            # Q 和 K 共享同一个 miu
+            self.miu = nn.Parameter(torch.empty(num_heads, num_clusters, d_model))
+        else:
+            # Q 和 K 各自拥有 miu
+            self.miu_Q = nn.Parameter(torch.empty(num_heads, num_clusters, d_model))
+            self.miu_K = nn.Parameter(torch.empty(num_heads, num_clusters, d_model))
+
+        # ----------------------------
+        # Experts 参数
+        # ----------------------------
+        if self.shared_experts:
+            # Q 和 K 共享专家
+            self.experts_weight = nn.Parameter(torch.empty(num_heads, num_clusters, d_model, expert_hidden_dim))
+            self.experts_bias = nn.Parameter(torch.empty(num_heads, num_clusters, expert_hidden_dim))
+        else:
+            # Q 和 K 各自拥有专家
+            self.experts_Q_weight = nn.Parameter(torch.empty(num_heads, num_clusters, d_model, expert_hidden_dim))
+            self.experts_Q_bias = nn.Parameter(torch.empty(num_heads, num_clusters, expert_hidden_dim))
+            self.experts_K_weight = nn.Parameter(torch.empty(num_heads, num_clusters, d_model, expert_hidden_dim))
+            self.experts_K_bias = nn.Parameter(torch.empty(num_heads, num_clusters, expert_hidden_dim))
         
         if not self.configs.is_training:
             return 
         # 使用k-means初始化聚类中心
         print(f"use_k_means_init:{configs.use_k_means_init}")
+
+
+        # 激活和 dropout
+        self.activation = nn.GELU()
+        self.dropout = nn.Dropout(0.1)
+
+        # 输出投影
+        self.output_projection = nn.Linear(num_heads * expert_hidden_dim, d_model)
+
         if init_data is not None:
             self._init_with_kmeans(init_data, n_init=kmeans_n_init, max_iter=kmeans_max_iter)
+
         else:
-            nn.init.normal_(self.miu, mean=0.0, std=0.02)
+            # 初始化参数
+            if self.shared_router:
+                nn.init.normal_(self.miu, mean=0.0, std=0.02)
+            else:
+                nn.init.normal_(self.miu_Q, mean=0.0, std=0.02)
+                nn.init.normal_(self.miu_K, mean=0.0, std=0.02)
+
+        if self.shared_experts:
+            nn.init.normal_(self.experts_weight, mean=0.0, std=0.02)
+            nn.init.zeros_(self.experts_bias)
+        else:
+            nn.init.normal_(self.experts_Q_weight, mean=0.0, std=0.02)
+            nn.init.normal_(self.experts_K_weight, mean=0.0, std=0.02)
+            nn.init.zeros_(self.experts_Q_bias)
+            nn.init.zeros_(self.experts_K_bias)
+
+        # if torch.isnan(self.miu_Q).any() or torch.isnan(self.miu_K).any():
+        #     print("❌ 严重错误: k-means 初始化后参数包含 NaN!")
 
         # 打印配置信息
         print(f"初始化MoE-Enhanced Clustered Attention:")
@@ -446,8 +530,167 @@ class MoEClusteredAttention(nn.Module):
         print(f"  - 簇数量: {num_clusters}")
         print(f"  - 更新权重: {update_weight}")
 
-    def _init_with_kmeans(self, init_data, n_init=30, max_iter=500):  # 增加默认值
-        """改进的k-means初始化，解决中心点聚集问题"""
+    def _get_router_parameters(self):
+        """获取router参数，处理共享/非共享情况"""
+        if self.shared_router:
+            if self.use_trainable_center:
+                miu_for_routing = self.miu
+            else:
+                miu_for_routing = self.miu.detach()
+            return miu_for_routing, miu_for_routing
+        else:
+            if self.use_trainable_center:
+                miu_Q = self.miu_Q
+                miu_K = self.miu_K
+            else:
+                miu_Q = self.miu_Q.detach()
+                miu_K = self.miu_K.detach()
+            return miu_Q, miu_K
+
+    def _compute_router_scores(self, x, miu, batch_size, seq_len):
+        """计算路由得分"""
+        miu_expanded = miu.unsqueeze(0).expand(batch_size, -1, -1, -1)
+        scores = torch.matmul(x, miu_expanded.transpose(-2, -1)) / (self.d_model ** 0.5)
+        return scores
+
+
+    def apply_experts_batch(self, x, assignments, is_query=True):
+        B, S, D = x.shape
+        H = self.num_heads
+        M = self.M
+        Dh = self.head_dim
+        device = x.device
+
+        if self.shared_experts:
+            W_full = self.experts_weight   # (H, M, D, Dh)
+            b_full = self.experts_bias     # (H, M, Dh)
+        else:
+            if is_query:
+                W_full = self.experts_Q_weight
+                b_full = self.experts_Q_bias
+            else:
+                W_full = self.experts_K_weight
+                b_full = self.experts_K_bias
+
+        # 使用与第一个版本相同的张量形状
+        x_exp = x.unsqueeze(1).expand(B, H, S, D)  # (B, H, S, D)
+        x_flat = x_exp.reshape(B * H * S, D)       # (B*H*S, D)
+        if not is_query:
+            pass
+            # print(assignments.shape)
+            # print(B,H,S)
+        assignments_flat = assignments.reshape(B * H * S)  # (B*H*S,)
+
+        output_flat = torch.zeros(B * H * S, Dh, dtype=x.dtype, device=device)
+
+        # 遍历每个专家
+        for m in range(M):
+            # 找出分配到专家m的所有token
+            mask = (assignments_flat == m)
+            if not mask.any():
+                continue
+                
+            indices = torch.nonzero(mask, as_tuple=True)[0]
+            x_selected = x_flat[indices]  # (N, D)
+            
+            # 获取对应的头索引
+            head_indices = indices // (B * S)  # 计算每个token属于哪个头
+            
+            # 为每个选择的token应用对应的专家
+            results = []
+            for idx, h in zip(indices, head_indices):
+                W_hm = W_full[h, m]  # (D, Dh)
+                b_hm = b_full[h, m]  # (Dh,)
+                result = F.linear(x_flat[idx:idx+1], W_hm.T, b_hm)
+                results.append(result)
+            
+            if results:
+                transformed = torch.cat(results, dim=0)
+                transformed = self.activation(transformed)
+                transformed = self.dropout(transformed)
+                output_flat[indices] = transformed
+        
+
+        # 重塑回原始形状
+        output = output_flat.reshape(B, H, S, Dh)
+        return output
+    
+    def assign_clusters(self, Q, K):
+        B, Sq, D = Q.shape
+        _, Sk, _ = K.shape
+        H = self.num_heads
+        M = self.M
+        device = Q.device
+
+        Q_exp = Q.unsqueeze(1).expand(B, H, Sq, D)
+        K_exp = K.unsqueeze(1).expand(-1, H, Sk, D)
+        # exit()
+        
+        # if self.use_learnable_text_emb:
+        #     K_exp = K_exp[0:B, :, :, :]
+
+        if self.shared_router:
+            if self.configs.is_debugging:
+                print("miu stats:", self.miu.min().item(), self.miu.max().item(), self.miu.isnan().sum().item())
+            x_combined = torch.cat([Q_exp, K_exp], dim=2)  # (B, H, Sq+Sk, D)
+            miu = self.miu
+            miu_exp = miu.unsqueeze(0).expand(B, H, M, D)
+            logits = torch.matmul(x_combined, miu_exp.transpose(-2, -1)) / (D ** 0.5 + 1e-6)
+            assignments = torch.argmax(logits, dim=-1)  # (B, H, Sq+Sk)
+            return assignments, logits
+        else:
+            if self.configs.is_debugging:
+                print("miu_Q stats:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
+                print("miu_K stats:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
+            miu_Q_exp = self.miu_Q.unsqueeze(0).expand(B, H, M, D)
+            miu_K_exp = self.miu_K.unsqueeze(0).expand(B, H, M, D)
+
+            logits_Q = torch.matmul(Q_exp, miu_Q_exp.transpose(-2, -1)) / (D ** 0.5 + 1e-6)
+            logits_K = torch.matmul(K_exp, miu_K_exp.transpose(-2, -1)) / (D ** 0.5 + 1e-6)
+
+            assign_Q = torch.argmax(logits_Q, dim=-1)
+            assign_K = torch.argmax(logits_K, dim=-1)
+
+            assignments = torch.cat([assign_Q, assign_K], dim=2)
+            logits = torch.cat([logits_Q, logits_K], dim=2)
+            return assignments, logits
+        
+    def compute_balance_loss(self, router_logits, assignments):
+        """
+        Compute auxiliary load balancing loss per head.
+        
+        Args:
+            router_logits: (B, H, S, M) - raw logits from router (before softmax)
+            assignments:   (B, H, S)   - hard cluster assignments (long tensor)
+        
+        Returns:
+            balance_loss: scalar tensor (mean over heads)
+        """
+        B, H, S, M = router_logits.shape
+        device = router_logits.device
+        if self.configs.is_debugging and torch.isnan(router_logits).any() or torch.isinf(router_logits).any():
+            print("Warning: router_logits contains NaN or Inf!")
+
+        # 1. Compute f_i: fraction of tokens assigned to each expert (per head)
+        # assignments: (B, H, S)
+        # Expand to one-hot: (B, H, S, M)
+        assignment_one_hot = F.one_hot(assignments, num_classes=M).float()  # (B, H, S, M)
+        f_i = assignment_one_hot.mean(dim=(0, 2))  # (H, M) — average over batch and seq
+
+        # 2. Compute p_i: mean router probability for each expert (per head)
+        router_probs = F.softmax(router_logits, dim=-1)  # (B, H, S, M)
+        p_i = router_probs.mean(dim=(0, 2))  # (H, M)
+
+        # 3. Balance loss per head: M * sum_{i=0}^{M-1} f_i * p_i
+        balance_loss_per_head = M * (f_i * p_i).sum(dim=-1)  # (H,)
+
+        # 4. Average over heads
+        balance_loss = balance_loss_per_head.mean()
+
+        return balance_loss
+
+    def _init_with_kmeans(self, init_data, n_init=30, max_iter=500, cache_path=None):  # 增加默认值
+        """改进的k-means初始化，解决中心点聚集问题，支持缓存"""
         print("使用改进的k-means算法初始化聚类中心")
         
         if isinstance(init_data, torch.Tensor):
@@ -457,6 +700,72 @@ class MoEClusteredAttention(nn.Module):
         
         self.data_np = data_np
 
+        # 检查缓存文件是否存在
+        if cache_path is None:
+            cache_path = f"./checkpoints/k_means_cache/num_cluster_{self.M}/d_model_{self.d_model}/{os.path.basename(self.configs.root_path)}"
+        # 确保缓存目录存在
+        cache_dir = os.path.dirname(cache_path)
+        if cache_dir and not os.path.exists(cache_dir):
+            os.makedirs(cache_dir, exist_ok=True)
+        
+        cache_file = cache_path
+        if os.path.exists(cache_file):
+            print(f"找到缓存文件: {cache_file}")
+            try:
+                # 加载缓存的聚类中心
+                cache_data = torch.load(cache_file)
+                cluster_centers = cache_data['cluster_centers']
+                cluster_labels = cache_data['cluster_labels']
+                self.M = cache_data['M']
+                
+                print(f"从缓存加载 {self.M} 个聚类中心")
+                
+                # 转换为PyTorch张量
+                cluster_centers_tensor = torch.tensor(cluster_centers, dtype=torch.float32)
+                cluster_centers_tensor = cluster_centers_tensor.unsqueeze(0).repeat(self.num_heads, 1, 1)
+
+                # 设置聚类中心
+                if self.shared_router:
+                    if isinstance(self.miu, nn.Parameter):
+                        self.miu.data.copy_(cluster_centers_tensor)
+                    else:
+                        self.miu.copy_(cluster_centers_tensor)
+                else:
+                    if isinstance(self.miu_Q, nn.Parameter):
+                        self.miu_Q.data.copy_(cluster_centers_tensor)
+                        self.miu_K.data.copy_(cluster_centers_tensor.clone())
+                    else:
+                        self.miu_Q.copy_(cluster_centers_tensor)
+                        self.miu_K.copy_(cluster_centers_tensor.clone())
+                
+                # 生成t-SNE图（如果需要）
+                if self.plot_tsne:
+                    folder_path = './tsne_results/init_stage/' + f"num_centers={self.configs.num_tx_experts}/"
+                    if not os.path.exists(folder_path):
+                        os.makedirs(folder_path)
+
+                    visualizer = TSNEVisualizer(output_dir=folder_path, M=self.M)
+                    file_name = f"{self.configs.model_id}_" + f"{self.configs.num_tx_experts}"
+
+                    visualizer.generate_tsne_plot(
+                        data=data_np,
+                        centers=cluster_centers,
+                        labels=cluster_labels,
+                        min_distance=0.5,
+                        title="Cached Clustering",
+                        filename=file_name
+                    )
+                
+                print("成功从缓存加载聚类中心")
+                return  # 直接返回，跳过后续计算
+                
+            except Exception as e:
+                print(f"加载缓存失败: {e}，将重新计算聚类中心")
+                cache_file = None  # 标记为需要重新计算
+
+        # 如果没有缓存或加载失败，执行原始的计算逻辑
+        print("未找到缓存文件或缓存加载失败，开始计算聚类中心...")
+        
         # 1. 数据标准化（解决尺度问题）
         from sklearn.preprocessing import StandardScaler
         scaler = StandardScaler()
@@ -527,30 +836,47 @@ class MoEClusteredAttention(nn.Module):
         cluster_centers = scaler.inverse_transform(best_centers)
         cluster_labels = kmeans.labels_
         
-        # 7. 转换为PyTorch张量
-        cluster_centers_tensor = torch.tensor(cluster_centers, dtype=torch.float32)
+        # 7. 缓存结果（如果指定了缓存路径）
+        if cache_file is not None:
+            try:
+                cache_data = {
+                    'cluster_centers': cluster_centers,
+                    'cluster_labels': cluster_labels,
+                    'M': self.M,
+                    'timestamp': time.time()
+                }
+                torch.save(cache_data, cache_file)
+                print(f"聚类中心已缓存到: {cache_file}")
+            except Exception as e:
+                print(f"缓存保存失败: {e}")
         
-        # 更新模块参数
-        if isinstance(self.miu, nn.Parameter):
-            self.miu.data.copy_(cluster_centers_tensor)
+        # 8. 转换为PyTorch张量
+        cluster_centers_tensor = torch.tensor(cluster_centers, dtype=torch.float32)
+
+        if self.shared_router:
+            if isinstance(self.miu, nn.Parameter):
+                self.miu.data.copy_(cluster_centers_tensor)
+            else:
+                self.miu.copy_(cluster_centers_tensor)
         else:
-            self.miu.copy_(cluster_centers_tensor)
+            # 非共享router时，Q和K使用相同的初始化簇核心
+            if isinstance(self.miu_Q, nn.Parameter):
+                self.miu_Q.data.copy_(cluster_centers_tensor)
+                self.miu_K.data.copy_(cluster_centers_tensor.clone())
+            else:
+                self.miu_Q.copy_(cluster_centers_tensor)
+                self.miu_K.copy_(cluster_centers_tensor.clone())
         
         print(f"成功初始化{self.M}个聚类中心")
         
-        # 8. 生成改进的t-SNE图
-        # if self.plot_tsne:
-        #     self._generate_tsne_plot(data_np, cluster_labels, \
-        #                                                     cluster_centers, min_distance)       
-        #     exit()
-
+        # 9. 生成改进的t-SNE图
         if self.plot_tsne:
             folder_path = './tsne_results/init_stage/' + f"num_centers={self.configs.num_tx_experts}/"
             if not os.path.exists(folder_path):
                 os.makedirs(folder_path)
 
             visualizer = TSNEVisualizer(output_dir=folder_path, M=self.M)
-            file_name =  f"{self.configs.model_id}_" + f"{self.configs.num_tx_experts}"
+            file_name = f"{self.configs.model_id}_" + f"{self.configs.num_tx_experts}"
 
             visualizer.generate_tsne_plot(
                 data=data_np,
@@ -561,43 +887,45 @@ class MoEClusteredAttention(nn.Module):
                 filename=file_name
             )
 
-            # exit()
-
-    def extract_cluster_centers(self):
-        """
-        从模型中提取簇核心(miu)并转换为适合 t-SNE 可视化的格式
-        
-        参数:
-        model: 包含簇核心的模型
-        
-        返回:
-        cluster_centers: (num_clusters, d_model) 的 NumPy 数组
-        """
-        # # 检查簇核心是参数还是缓冲区
-        # if hasattr(model, 'miu'):
-        #     miu_tensor = model.miu
-        # else:
-        #     raise AttributeError("模型中没有 'miu' 属性")
-        
-        miu_tensor = self.miu
-
-        # 确保我们处理的是张量
-        if not isinstance(miu_tensor, torch.Tensor):
-            raise TypeError("'miu' 应该是 torch.Tensor 类型")
-        
-        # 处理梯度计算和计算图分离
-        if miu_tensor.requires_grad:
-            # 如果是可训练参数，需要分离计算图并复制数据
-            miu_tensor = miu_tensor.detach()
-        
-        # 移动到 CPU 并转换为 NumPy 数组
-        cluster_centers = miu_tensor.cpu().numpy()
-        
-        # 验证形状
-        if len(cluster_centers.shape) != 2:
-            raise ValueError(f"簇核心形状应为 (num_clusters, d_model)，实际为 {cluster_centers.shape}")
-        
-        return cluster_centers
+    def _update_cluster_centers(self, Q, assignments, batch_size, Sq):
+        """更新簇核心"""
+        if self.shared_router:
+            # 共享router：使用Q的分配更新miu
+            cluster_queries = [[] for _ in range(self.M)]
+            query_assignments = assignments[:, :Sq]
+            
+            for b in range(batch_size):
+                for i in range(Sq):
+                    m = query_assignments[b, i].item()
+                    cluster_queries[m].append(Q[b, i])
+            
+            new_miu = self.miu.clone()
+            for m in range(self.M):
+                if cluster_queries[m]:
+                    queries_tensor = torch.stack(cluster_queries[m])
+                    new_centroid = queries_tensor.mean(dim=0)
+                    new_miu[m] = (1 - self.lambda_) * new_miu[m] + self.lambda_ * new_centroid
+            
+            self.miu.copy_(new_miu)
+        else:
+            # 不共享router：分别更新miu_Q和miu_K
+            # 更新Q的簇核心
+            cluster_queries_q = [[] for _ in range(self.M)]
+            query_assignments = assignments[:, :Sq]
+            
+            for b in range(batch_size):
+                for i in range(Sq):
+                    m = query_assignments[b, i].item()
+                    cluster_queries_q[m].append(Q[b, i])
+            
+            new_miu_Q = self.miu_Q.clone()
+            for m in range(self.M):
+                if cluster_queries_q[m]:
+                    queries_tensor = torch.stack(cluster_queries_q[m])
+                    new_centroid = queries_tensor.mean(dim=0)
+                    new_miu_Q[m] = (1 - self.lambda_) * new_miu_Q[m] + self.lambda_ * new_centroid
+            
+            self.miu_Q.copy_(new_miu_Q)
 
     def plot_t_SNE(self):
         assert(self.plot_tsne)
@@ -625,8 +953,7 @@ class MoEClusteredAttention(nn.Module):
         )
 
     def f_plot_attn(self, attention_weights, idx):
-        folder_path = './attn_results/MoE_attn/'
-        folder_path  += f"num_centers:{self.configs.num_tx_experts}/"
+        folder_path = f"./attn_results/MoE_attn/plot_attn/{self.configs.model}/num_centers:{self.configs.num_tx_experts}/"
 
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -654,34 +981,34 @@ class MoEClusteredAttention(nn.Module):
         生成基于聚类的稀疏注意力
         
         Args:
-            Q_prime: 变换后的查询 [batch_size, seq_len_q, d_model]
-            K_prime: 变换后的键 [batch_size, seq_len_k, d_model]
-            V: 值矩阵 [batch_size, seq_len_k, d_model]
-            assignments: 专家分配 [batch_size, seq_len_q + seq_len_k]
+            Q_prime: 变换后的查询 [batch_size, Sq, d_model]
+            K_prime: 变换后的键 [batch_size, Sk, d_model]
+            V: 值矩阵 [batch_size, Sk, d_model]
+            assignments: 专家分配 [batch_size, Sq + Sk]
             M: 簇的数量
         
         Returns:
-            attention_output: 注意力输出 [batch_size, seq_len_q, d_model]
-            attention_weights: 注意力权重 [batch_size, seq_len_q, seq_len_k]
+            attention_output: 注意力输出 [batch_size, Sq, d_model]
+            attention_weights: 注意力权重 [batch_size, Sq, Sk]
         """
-        batch_size, seq_len_q, d_model = Q_prime.shape
-        _, seq_len_k, _ = K_prime.shape
+        batch_size, Sq, d_model = Q_prime.shape
+        _, Sk, _ = K_prime.shape
         device = Q_prime.device
         M = self.M
         
         # 初始化输出和注意力权重存储
         attention_output = torch.zeros_like(Q_prime)
-        attention_weights = torch.zeros(batch_size, seq_len_q, seq_len_k, device=device)
+        attention_weights = torch.zeros(batch_size, Sq, Sk, device=device)
         
         # 获取查询和键的簇分配
-        query_assignments = assignments[:, :seq_len_q]  # [batch_size, seq_len_q]
-        key_assignments = assignments[:, seq_len_q:]    # [batch_size, seq_len_k]
+        query_assignments = assignments[:, :Sq]  # [batch_size, Sq]
+        key_assignments = assignments[:, Sq:]    # [batch_size, Sk]
         
         # 方法1: 批量计算(更高效)
         for m in range(M):
             # 找出属于簇m的查询和键的mask
-            query_mask = (query_assignments == m)  # [batch_size, seq_len_q]
-            key_mask = (key_assignments == m)      # [batch_size, seq_len_k]
+            query_mask = (query_assignments == m)  # [batch_size, Sq]
+            key_mask = (key_assignments == m)      # [batch_size, Sk]
             
             for b in range(batch_size):
                 q_indices = query_mask[b].nonzero(as_tuple=True)[0]
@@ -714,77 +1041,131 @@ class MoEClusteredAttention(nn.Module):
                 
         return attention_output, attention_weights
 
-    def forward(self, Q, K, V, idx):
-        batch_size, seq_len_q, d = Q.shape
-        _, seq_len_k, _ = K.shape
+    # ---------------------------- 聚类注意力部分 ----------------------------
+    def generate_clustered_attention_fast(self, Q_prime, K_prime, V, assignments):
+        B,H,Sq,Dh = Q_prime.shape
+        _,_,Sk,_ = K_prime.shape
+
+        query_assignments = assignments[:,:,:Sq]
+        key_assignments = assignments[:,:,Sq:]
+
+        attn_scores = torch.full((B, H, Sq, Sk), -1e9, device=Q_prime.device, dtype=Q_prime.dtype)
+       
+        mask = (query_assignments.unsqueeze(-1) == key_assignments.unsqueeze(-2))
+        # mask: (B, H, Sq, Sk) - 布尔掩码，标识哪些查询-键对属于同一簇
+        if mask.any():
+        # 对同类位置计算注意力分数
+            same_cluster_idx = mask.nonzero(as_tuple=True)  # 获取同类位置索引
+
+            # 高级索引，同批次，同一个头，的q和k计算
+            ## 这里理不清了，ai说是头独立和簇独立的。
+            q_sel = Q_prime[same_cluster_idx[0], same_cluster_idx[1], same_cluster_idx[2]]  # [N, Dh]
+            k_sel = K_prime[same_cluster_idx[0], same_cluster_idx[1], same_cluster_idx[3]]  # [N, Dh]
+            scores = torch.sum(q_sel * k_sel, dim=-1) / (Dh ** 0.5 )  # [N]
+            attn_scores[same_cluster_idx] = scores  # 更新同类位置分数
+
+        # softmax
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        attention_output = torch.matmul(attn_probs, V)
+       
+        attn_probs = attn_probs.detach().cpu().numpy()
+        return attention_output, attn_probs
+
+    def generate_clustered_attention_batch_fast_dense(self, Q_prime, K_prime, V_prime, assignments):
+        B, H, Sq, Dh = Q_prime.shape
+        _, _, Sk, _ = K_prime.shape
+
+        query_assignments = assignments[:, :, :Sq]      # (B, H, Sq)
+        key_assignments   = assignments[:, :, Sq:]      # (B, H, Sk)
+
+        # 1. 全量 QK 计算（高度并行）
+        attn_scores = torch.matmul(Q_prime, K_prime.transpose(-2, -1)) / (Dh ** 0.5)
+
+        # 2. 构建“不同簇”掩码（注意：是 !=）
+        mask = (query_assignments.unsqueeze(-1) != key_assignments.unsqueeze(-2))  # (B, H, Sq, Sk)
+
+        # 3. 关键：用 -inf 掩盖不同簇 → softmax 后概率为 0
+        # attn_scores = attn_scores.masked_fill(mask, float('-inf'))
+        attn_scores = attn_scores.masked_fill(mask, -1e9)
+
+        # 4. softmax（自动在同簇 key 上归一化）
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        if self.configs.is_debugging:
+            nan_debugging_report(attn_probs, "attn_probs")
+        O = torch.matmul(attn_probs, V_prime)
+        attn_probs = attn_probs.detach().cpu().numpy()
+        # 5. 输出
+        return O, attn_probs
+
+
+    def forward(self, Q, K, V, idx=0):
+        
+        B, Sq, D = Q.shape
+        _, Sk, _ = K.shape
+        H = self.num_heads
+        M = self.M
         device = Q.device
+
         # print("QK")
         # print(Q.shape)
         # print(K.shape)
-        
-        # 根据配置选择簇核心处理方式
-        if self.use_trainable_center:
-            # 使用可训练参数（带梯度）
-            miu_for_routing = self.miu
-        else:
-            # 使用分离的miu进行路由计算（不产生梯度）
-            miu_for_routing = self.miu.detach()
-        
-        # 1. 合并Q和K用于路由计算
-        x = torch.cat([Q, K], dim=1)  # [batch_size, seq_len_q + seq_len_k, d]
-        
-        # 2. 计算路由得分
-        miu_expanded = miu_for_routing.unsqueeze(0).expand(batch_size, -1, -1)
-        scores = torch.matmul(x, miu_expanded.transpose(1, 2)) / (d ** 0.5)  # [batch_size, 2*seq_len, M]
-        
-        # 3. 确定专家分配
-        assignments = torch.argmax(scores, dim=-1)  # [batch_size, 2*seq_len]
-        
-        # 检查和分析分簇结果 (只在训练时或需要调试时启用)
-        # 条件可以根据需要修改，例如 if self.configs.is_testing:
-        if self.training and self.enable_token_stats:
-            # 步骤 A: 更新当前批次的统计数据
-            self.token_stats.update(assignments, seq_len_q, seq_len_k)
+        # miu_Q, miu_K = self._get_router_parameters()
+        if self.configs.is_debugging:
+            nan_debugging_report(Q, "init_Q")
+            print("miu_Q stats0:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
+            print("miu_K stats0:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
+
+        assignments, router_logits = self.assign_clusters(Q, K)
+
+        if self.configs.is_debugging:
+            print("miu_Q stats1:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
+            print("miu_K stats1:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
+
+        if self.configs.is_debugging and torch.isnan(router_logits).any():
+            print("❌ router_logits 包含 NaN!")
+            print("router_logits stats:", router_logits.min().item(), router_logits.max().item(), torch.isnan(router_logits).sum().item())
+
+        if self.configs.is_testing:
+            self.stats.update_qk_stats(
+                        batch_id=idx,
+                        batch_size=Q.size(0),
+                        Sq=Q.size(1),
+                        Sk=K.size(1),
+                        d_model=self.d_model,
+                        assignments=assignments,
+                        M=self.M
+                    )
             
-            # 步骤 B: 在控制台打印详细的分布表格
-            # 为了避免刷屏，可以设置一个条件，比如每隔50个batch打印一次
-            if idx % 50 == 0: 
-                print(f"--- [Batch Index: {idx}] - Cluster Assignment Analysis ---")
-                self.token_stats.print_batch_distribution()
+        if self.configs.is_debugging:
+            print("miu_Q stats2:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
+            print("miu_K stats2:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
 
-            # 步骤 C (可选): 绘制并保存分布图
-            # 这会生成图片，通常用于更深入的分析，而不是每个batch都调用
-            # if idx % 200 == 0:
-            #     save_path = f"./cluster_plots/batch_{idx}_distribution.png"
-            #     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            #     self.token_stats.plot_distribution(save_path=save_path)
+        # Step 2: 专家变换（支持共享/非共享 experts）
+        K_prime = self.apply_experts_batch(K, assignments[:, :, Sq:], is_query=False)
+        Q_prime = self.apply_experts_batch(Q, assignments[:, :, :Sq], is_query=True)
+        V_prime = K_prime
 
-        # --- 核查代码结束 ---
+        if self.configs.is_debugging:
+            print("miu_Q stats3:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
+            print("miu_K stats3:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
         
-        # 4. 应用专家变换
-        x_transformed = torch.zeros_like(x)
-        
-        # 处理查询向量 (前seq_len个)
-        # print(assignments.shape)
-        for m in range(self.M):
-            mask = (assignments == m) & (torch.arange(seq_len_q + seq_len_k, device=device) < seq_len_q)
-            for b in torch.where(mask.any(dim=1))[0]:
-                indices = mask[b].nonzero(as_tuple=True)[0]
-                x_transformed[b, indices] = self.experts_Q[m](x[b, indices])
-        
-        # 处理键向量 (后seq_len个)
-        for m in range(self.M):
-            mask = (assignments == m) & (torch.arange(seq_len_q + seq_len_k, device=device) >= seq_len_q)
-            for b in torch.where(mask.any(dim=1))[0]:
-                indices = mask[b].nonzero(as_tuple=True)[0]
-                x_transformed[b, indices] = self.experts_K[m](x[b, indices])
-        
-        # 分离变换后的Q'和K'
-        Q_prime = x_transformed[:, :seq_len_q]
-        K_prime = x_transformed[:, seq_len_q:]
-        V = K_prime
-        
-        O, attention_weights = self.generate_clustered_attention(Q_prime, K_prime, V, assignments)
+        O, attention_weights = self.generate_clustered_attention_fast(Q_prime, K_prime, V_prime, assignments)
+
+        if self.configs.is_debugging:
+            nan_debugging_report(O, "clustered_attention_O")
+
+        combined = O.transpose(1, 2).contiguous().view(B, Sq, self.num_heads * self.head_dim)
+        O = self.output_projection(combined)
+
+        if self.configs.is_debugging:
+            print("miu_Q stats4:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
+            print("miu_K stats4:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
+
+        balance_loss = self.compute_balance_loss(router_logits, assignments)
+
+        if self.configs.is_debugging:
+            print("miu_Q stats5:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
+            print("miu_K stats5:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
 
         if self.plot_attn and self.configs.is_testing:
             self.f_plot_attn(attention_weights, idx)
@@ -792,40 +1173,23 @@ class MoEClusteredAttention(nn.Module):
         
         # 6. 簇核心更新策略
         if self.training and not self.use_trainable_center:
-            # 只在训练模式且使用EMA更新时执行
-            # 收集整个批次中每个簇的查询向量
-            cluster_queries = [[] for _ in range(self.M)]
-            query_assignments = assignments[:, :seq_len_q]
-            
-            for b in range(batch_size):
-                for i in range(seq_len_q):
-                    m = query_assignments[b, i].item()
-                    cluster_queries[m].append(Q[b, i])
-            
-            # 更新聚类中心
-            new_miu = self.miu.clone()  # 创建副本用于更新
-            
-            for m in range(self.M):
-                if cluster_queries[m]:
-                    queries_tensor = torch.stack(cluster_queries[m])
-                    new_centroid = queries_tensor.mean(dim=0)
-                    new_miu[m] = (1 - self.lambda_) * new_miu[m] + self.lambda_ * new_centroid
-            
-            # 无梯度更新
-            self.miu.copy_(new_miu)
+            print("!!!")
+            self._update_cluster_centers(Q, assignments, B, Sq)
 
-            
-        
-        return O+Q, 0
+        if self.configs.is_debugging:
+            print("miu_Q stats6:", self.miu_Q.min().item(), self.miu_Q.max().item(), self.miu_Q.isnan().sum().item())
+            print("miu_K stats6:", self.miu_K.min().item(), self.miu_K.max().item(), self.miu_K.isnan().sum().item())
 
-    def get_stats_summary(self):
-        """获取统计摘要"""
-        return self.stats.get_summary()
-    
-    def print_stats(self):
-        """打印统计信息"""
-        self.stats.print_summary()
-    
-    def reset_stats(self):
-        """重置统计"""
-        self.stats.reset_stats()
+        if torch.isnan(balance_loss).any() or torch.isinf(balance_loss).any():
+            print("Warning: balance_loss is NaN or Inf!")
+            print(balance_loss)
+
+        if self.configs.is_debugging:
+            print("-------------------------")
+            nan_debugging_report(O, "final_O")
+            
+        return O+Q, balance_loss
+
+    def finalize_statistics(self, experiment_name: str = None):
+        """在训练/测试结束时调用此方法保存统计"""
+        return self.stats.save_final_summary(experiment_name)

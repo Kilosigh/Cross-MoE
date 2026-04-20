@@ -112,6 +112,7 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
     def __init__(self, args):
         super(Exp_Long_Term_Forecast_MM, self).__init__(args)
         configs=args
+
         self.plot_tsne = configs.plot_tsne
 
         self.text_path=configs.text_path
@@ -426,7 +427,6 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
             if self.args.mix_type == 2:
                 if self.args.use_k_means_init:
                     self.args.cluster_init_text_data = self.data_set_dict["train"].get_full_text()
-                self.args.d_model = self.args.llm_dim
             model = self.model_dict['Cross_MoE'].Model(self.args).float()
         elif self.args.use_Unified_model:
             model = self.model_dict['MoE_TS_Text_fuser'].Model(self.args).float()
@@ -467,17 +467,18 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
         self.model.eval()
 
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark,index) in enumerate(vali_loader):
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark, index) in enumerate(vali_loader):
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float()
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
-                if self.args.features == "S":
+                if self.args.features == "S" and not self.args.use_learnable_text_emb:
                     prior_y=torch.from_numpy(vali_data.get_prior_y(index)).float().to(self.device)
                 else:
                     prior_y = 0
-
-                batch_text=vali_data.get_text(index)
+                batch_text = None
+                if self.args.use_text:
+                    batch_text=vali_data.get_text(index)
 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
@@ -548,7 +549,7 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
-
+        
         for epoch in range(self.args.train_epochs):
             iter_count = 0
             train_loss = []
@@ -557,14 +558,14 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
                 self.args.sampler.set_epoch(epoch)  
             epoch_time = time.time()
             
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark,index) in enumerate(train_loader):
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark, index) in enumerate(train_loader):
                 try:
                     iter_count += 1
                     model_optim.zero_grad()
                     batch_x = batch_x.float().to(self.device)
                     batch_y = batch_y.float().to(self.device)
                     #0523
-                    if self.args.features == "S":
+                    if self.args.features == "S" and not self.args.use_learnable_text_emb:
                         prior_y=torch.from_numpy(train_data.get_prior_y(index)).float().to(self.device)
                     else:
                         prior_y = 0
@@ -574,7 +575,10 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
                     # decoder input 给定一定的前文提示，当做解码器的输入
                     dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                     dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
-                    batch_text=train_data.get_text(index)
+
+                    batch_text = None
+                    if self.args.use_text:
+                        batch_text=train_data.get_text(index)
                     # encoder - decoder
                     if self.args.calculate_overhead:
                         # flops, params = profile(self.model, inputs=((batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text)))
@@ -593,6 +597,7 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
                             ret_dict = self.model((batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text))
                     else:
                         ret_dict = self.model((batch_x, batch_x_mark, dec_inp, batch_y_mark, batch_text))
+
                     vars = safe_unpack(ret_dict)
                     outputs, prompt_emb, aux_loss = vars.outputs, vars.prompt_emb, vars.aux_loss
 
@@ -626,21 +631,22 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
                         print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
                         iter_count = 0
                         time_now = time.time()
-                    model = self.model.mixer.moe_enhanced_cross
-                    if self.args.is_debugging:
-                        print("前向传播后 - miu_Q:", model.miu_Q.min().item(), model.miu_Q.max().item())
-                        print("前向传播后 - miu_K:", model.miu_K.min().item(), model.miu_K.max().item())
-                    if self.args.use_amp:
-                        scaler.scale(loss).backward()
-                        scaler.step(model_optim)
-                        scaler.update()
-                    else:
-                        model_optim.zero_grad()
-                        loss.backward()
-                        model_optim.step()
-                    if self.args.is_debugging:
-                        print("反向传播后 - miu_Q:", model.miu_Q.min().item(), model.miu_Q.max().item())
-                        print("反向传播后 - miu_K:", model.miu_K.min().item(), model.miu_K.max().item())
+                    if self.args.mix_type == 2:
+                        model = self.model.mixer.moe_enhanced_cross
+                        if self.args.is_debugging:
+                            print("前向传播后 - miu_Q:", model.miu_Q.min().item(), model.miu_Q.max().item())
+                            print("前向传播后 - miu_K:", model.miu_K.min().item(), model.miu_K.max().item())
+                        if self.args.use_amp:
+                            scaler.scale(loss).backward()
+                            scaler.step(model_optim)
+                            scaler.update()
+                        else:
+                            model_optim.zero_grad()
+                            loss.backward()
+                            model_optim.step()
+                        if self.args.is_debugging:
+                            print("反向传播后 - miu_Q:", model.miu_Q.min().item(), model.miu_Q.max().item())
+                            print("反向传播后 - miu_K:", model.miu_K.min().item(), model.miu_K.max().item())
                 except RuntimeError as e:
                     print(f"捕获到异常: {e}")
                 finally:
@@ -688,12 +694,14 @@ class Exp_Long_Term_Forecast_MM(Exp_Basic):
                 
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
-                if self.args.features == "S":
+                if self.args.features == "S" and not self.args.use_learnable_text_emb:
                     prior_y=torch.from_numpy(test_data.get_prior_y(index)).float().to(self.device)
                 else:
                     prior_y = 0
                 #input_start_dates,input_end_dates=test_data.get_date(index)
-                batch_text=test_data.get_text(index)
+                batch_text = None
+                if self.args.use_text:
+                    batch_text=test_data.get_text(index)
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 

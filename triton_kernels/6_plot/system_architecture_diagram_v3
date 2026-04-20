@@ -1,0 +1,64 @@
+digraph "System Architecture" {
+	compound=true fontname=SimHei rankdir=TB splines=ortho
+	node [fillcolor="#f9f9f9" fontname=SimHei shape=box style="rounded,filled"]
+	UI -> API [label="HTTP / WebSocket"]
+	Dashboard -> DataCtrl
+	Intervention -> TaskQueue
+	Vis -> TaskQueue
+	API -> TaskQueue [label="任务分发"]
+	API -> DataCtrl [label="状态查询"]
+	subgraph cluster_top {
+		color=blue label="表现与逻辑层" style=dashed
+		subgraph cluster_presentation {
+			bgcolor="#e8f4f8" color=blue label="表现层" style=dashed
+			UI [label="Web可视化前端"]
+			Dashboard [label="数据资产总览与图表渲染"]
+			Intervention [label="外部因素冲击模拟表单"]
+			Vis [label="多模态注意力热图呈现"]
+			{
+				rank=same
+				UI -> Dashboard [style=invis]
+				Dashboard -> Intervention [style=invis]
+				Intervention -> Vis [style=invis]
+			}
+		}
+		subgraph cluster_logic {
+			bgcolor="#eef7ee" color=green label="业务逻辑层" style=dashed
+			API [label="API网关"]
+			DataCtrl [label="数据对齐与预处理控制器"]
+			TaskQueue [label="异步推理任务队列"]
+			{
+				rank=same
+				API -> DataCtrl [style=invis]
+				DataCtrl -> TaskQueue [style=invis]
+			}
+		}
+	}
+	subgraph cluster_bottom {
+		color=purple label="推理与数据层" style=dashed
+		subgraph cluster_data {
+			bgcolor="#fdf0f0" color=red label="数据访问层" style=dashed
+			MetaDB [label="关系型数据库元数据管理"]
+			VectorStore [label="列式二进制存储多模态对齐特征"]
+			MetaDB -> VectorStore [style=invis weight=10]
+		}
+		subgraph cluster_inference {
+			bgcolor="#f4eef7" color=purple label="模型推理层" style=dashed
+			PyTorch [label="PyTorch推理引擎"]
+			MoE_Module [label="MoE-Attn多模态融合模块"]
+			LLM_Embed [label="LLM文本特征提取器"]
+			Triton_Kernel [label="底层Triton自定义算子"]
+			PyTorch -> MoE_Module [weight=10]
+			MoE_Module -> LLM_Embed [label="文本特征提取"]
+			MoE_Module -> Triton_Kernel [label="JIT编译与调用"]
+			{
+				rank=same
+				LLM_Embed -> Triton_Kernel [style=invis]
+			}
+		}
+	}
+	DataCtrl -> MetaDB [label="元数据聚合与统计渲染" weight=10]
+	TaskQueue -> PyTorch [label="触发推理" weight=10]
+	DataCtrl -> VectorStore [label="数据检索与对齐" headport=nw tailport=sw weight=1]
+	PyTorch -> VectorStore [label="加载时序与文本张量" constraint=false]
+}

@@ -8,6 +8,7 @@
 /scripts
 /test_results
 /tsne_results
+/convergence
 *.tar.gz
 *.tar
 *.npy
@@ -15,3 +16,6 @@
 *.pdf
 result*
 MoE_coeff
+*.pyc
+.sqlite
+uniform_init_router*

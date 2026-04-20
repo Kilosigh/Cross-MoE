@@ -49,6 +49,7 @@ warnings.filterwarnings('ignore')
 class Exp_Long_Term_Forecast(Exp_Basic):
     def __init__(self, args):
         super(Exp_Long_Term_Forecast, self).__init__(args)
+        
         configs=args
         self.text_path=configs.text_path
         self.prompt_weight=configs.prompt_weight
@@ -416,27 +417,27 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 batch_y = batch_y.float()
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
-                if self.args.features == "S":
+                if self.args.features == "S" and self.args.use_text:
                     prior_y=torch.from_numpy(vali_data.get_prior_y(index)).float().to(self.device)
+                    batch_text=vali_data.get_text(index) # B, N?
                 else:
                     prior_y = 0
+                
+                if self.args.use_text:
+                    if self.Doc2Vec==False:
+                        prompt = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in batch_text]
+                        
+                        prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024).input_ids
+                        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(self.device))  # (batch, prompt_token, dim)
+                    else:
+                        prompt = batch_text
+                        prompt_embeddings = torch.tensor([self.text_model.infer_vector(text) for text in prompt]).to(self.device)
+                    if self.use_fullmodel:
+                        prompt_emb =self.llm_model(inputs_embeds=prompt_embeddings).last_hidden_state
+                    else:
+                        prompt_emb=prompt_embeddings 
 
-                batch_text=vali_data.get_text(index) # B, N?
-
-                if self.Doc2Vec==False:
-                    prompt = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in batch_text]
-                    
-                    prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024).input_ids
-                    prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(self.device))  # (batch, prompt_token, dim)
-                else:
-                    prompt = batch_text
-                    prompt_embeddings = torch.tensor([self.text_model.infer_vector(text) for text in prompt]).to(self.device)
-                if self.use_fullmodel:
-                    prompt_emb =self.llm_model(inputs_embeds=prompt_embeddings).last_hidden_state
-                else:
-                    prompt_emb=prompt_embeddings 
-
-                prompt_emb = self.mlp(prompt_emb)  # (batch, prompt_token, text_embedding_dim)
+                    prompt_emb = self.mlp(prompt_emb)  # (batch, prompt_token, text_embedding_dim)
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
@@ -455,29 +456,29 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
             
+                if self.args.use_text:
+                    if self.Doc2Vec==False:
+                        if self.pool_type=="avg":                
+                            global_avg_pool = F.adaptive_avg_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_avg_pool.unsqueeze(-1)
+                        elif self.pool_type=="max":
+                            global_max_pool = F.adaptive_max_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_max_pool.unsqueeze(-1)
+                        elif self.pool_type=="min":
+                            global_min_pool = F.adaptive_max_pool1d(-1.0*prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_min_pool.unsqueeze(-1)
+                        elif self.pool_type == "attention":
 
-                if self.Doc2Vec==False:
-                    if self.pool_type=="avg":                
-                        global_avg_pool = F.adaptive_avg_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_avg_pool.unsqueeze(-1)
-                    elif self.pool_type=="max":
-                        global_max_pool = F.adaptive_max_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_max_pool.unsqueeze(-1)
-                    elif self.pool_type=="min":
-                        global_min_pool = F.adaptive_max_pool1d(-1.0*prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_min_pool.unsqueeze(-1)
-                    elif self.pool_type == "attention":
+                            outputs_reshaped = outputs
+                            attention_scores = torch.bmm(prompt_emb, outputs_reshaped)  
+                            attention_weights = F.softmax(attention_scores, dim=1)  
 
-                        outputs_reshaped = outputs
-                        attention_scores = torch.bmm(prompt_emb, outputs_reshaped)  
-                        attention_weights = F.softmax(attention_scores, dim=1)  
+                            weighted_prompt_emb = torch.sum(prompt_emb * attention_weights, dim=1)  
 
-                        weighted_prompt_emb = torch.sum(prompt_emb * attention_weights, dim=1)  
-
-                        prompt_emb = weighted_prompt_emb.unsqueeze(-1)  
-                
-                else:
-                    prompt_emb=prompt_emb.unsqueeze(-1)
+                            prompt_emb = weighted_prompt_emb.unsqueeze(-1)  
+                    
+                    else:
+                        prompt_emb=prompt_emb.unsqueeze(-1)
 
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
 
@@ -547,10 +548,12 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
                 #0523
-                if self.args.features == "S":
+                if self.args.features == "S" and self.args.use_text:
                     prior_y=torch.from_numpy(train_data.get_prior_y(index)).float().to(self.device)
+                    batch_text=train_data.get_text(index)
                 else:
                     prior_y = 0
+                    batch_text=None
                 
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
@@ -558,21 +561,22 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # decoder input 给定一定的前文提示，当做解码器的输入
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
-                batch_text=train_data.get_text(index)
-                if self.Doc2Vec==False:
-                    prompt = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in batch_text]
-                    # len(prompt) = B
-                    prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024).input_ids
-                    prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(self.device))  # (batch, prompt_token, dim)
-                else:
-                    prompt = batch_text
-                    prompt_embeddings = torch.tensor([self.text_model.infer_vector(text) for text in prompt]).to(self.device)
-                if self.use_fullmodel:
-                    prompt_emb =self.llm_model(inputs_embeds=prompt_embeddings).last_hidden_state
-                else:
-                    prompt_emb=prompt_embeddings 
+                
+                if self.args.use_text:
+                    if self.Doc2Vec==False:
+                        prompt = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in batch_text]
+                        # len(prompt) = B
+                        prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024).input_ids
+                        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(self.device))  # (batch, prompt_token, dim)
+                    else:
+                        prompt = batch_text
+                        prompt_embeddings = torch.tensor([self.text_model.infer_vector(text) for text in prompt]).to(self.device)
+                    if self.use_fullmodel:
+                        prompt_emb =self.llm_model(inputs_embeds=prompt_embeddings).last_hidden_state
+                    else:
+                        prompt_emb=prompt_embeddings 
                     
-                prompt_emb = self.mlp(prompt_emb)  # (batch, prompt_token, pred_len)
+                    prompt_emb = self.mlp(prompt_emb)  # (batch, prompt_token, pred_len)
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
@@ -592,30 +596,30 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
             
+                if self.args.use_text:
+                    if self.Doc2Vec==False:
+                        if self.pool_type=="avg":   # B, pred_len, 1     
+                            global_avg_pool = F.adaptive_avg_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_avg_pool.unsqueeze(-1)
+                        elif self.pool_type=="max":
+                            global_max_pool = F.adaptive_max_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_max_pool.unsqueeze(-1)
+                        elif self.pool_type=="min":
+                            global_min_pool = F.adaptive_max_pool1d(-1.0*prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_min_pool.unsqueeze(-1)
+                        elif self.pool_type == "attention":
 
-                if self.Doc2Vec==False:
-                    if self.pool_type=="avg":   # B, pred_len, 1     
-                        global_avg_pool = F.adaptive_avg_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_avg_pool.unsqueeze(-1)
-                    elif self.pool_type=="max":
-                        global_max_pool = F.adaptive_max_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_max_pool.unsqueeze(-1)
-                    elif self.pool_type=="min":
-                        global_min_pool = F.adaptive_max_pool1d(-1.0*prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_min_pool.unsqueeze(-1)
-                    elif self.pool_type == "attention":
+                            outputs_reshaped = outputs#.transpose(1, 2) 
+                            outputs_norm = F.normalize(outputs_reshaped, p=2, dim=1) 
+                            prompt_emb_norm = F.normalize(prompt_emb, p=2, dim=2) 
+                            attention_scores = torch.bmm(prompt_emb_norm, outputs_norm) 
+                            attention_weights = F.softmax(attention_scores, dim=1) 
+                            
+                            weighted_prompt_emb = torch.sum(prompt_emb * attention_weights, dim=1)  
 
-                        outputs_reshaped = outputs#.transpose(1, 2) 
-                        outputs_norm = F.normalize(outputs_reshaped, p=2, dim=1) 
-                        prompt_emb_norm = F.normalize(prompt_emb, p=2, dim=2) 
-                        attention_scores = torch.bmm(prompt_emb_norm, outputs_norm) 
-                        attention_weights = F.softmax(attention_scores, dim=1) 
-                        
-                        weighted_prompt_emb = torch.sum(prompt_emb * attention_weights, dim=1)  
-
-                        prompt_emb = weighted_prompt_emb.unsqueeze(-1) 
-                else:
-                    prompt_emb=prompt_emb.unsqueeze(-1)
+                            prompt_emb = weighted_prompt_emb.unsqueeze(-1) 
+                    else:
+                        prompt_emb=prompt_emb.unsqueeze(-1)
 
                 # torch.autograd.set_detect_anomaly(True)
 
@@ -695,33 +699,34 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
                 #0523
-                if self.args.features == "S":
+                if self.args.features == "S" and self.args.use_text:
                     prior_y=torch.from_numpy(test_data.get_prior_y(index)).float().to(self.device)
+                    batch_text=test_data.get_text(index)
                 else:
                     prior_y = 0
                 #input_start_dates,input_end_dates=test_data.get_date(index)
                 #0523
-                batch_text=test_data.get_text(index)
-
-                prompt = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in batch_text]
+                
 
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
-                if self.Doc2Vec==False:
-                    prompt = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in batch_text]
 
-                    prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024).input_ids
-                    prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(self.device))  # (batch, prompt_token, dim)
-                else:
-                    prompt = batch_text
-                    prompt_embeddings = torch.tensor([self.text_model.infer_vector(text) for text in prompt]).to(self.device)
-                if self.use_fullmodel:
-                    prompt_emb =self.llm_model(inputs_embeds=prompt_embeddings).last_hidden_state
-                else:
-                    prompt_emb=prompt_embeddings 
+                if self.args.use_text:
+                    if self.Doc2Vec==False:
+                        prompt = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in batch_text]
+
+                        prompt = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024).input_ids
+                        prompt_embeddings = self.llm_model.get_input_embeddings()(prompt.to(self.device))  # (batch, prompt_token, dim)
+                    else:
+                        prompt = batch_text
+                        prompt_embeddings = torch.tensor([self.text_model.infer_vector(text) for text in prompt]).to(self.device)
+                    if self.use_fullmodel:
+                        prompt_emb =self.llm_model(inputs_embeds=prompt_embeddings).last_hidden_state
+                    else:
+                        prompt_emb=prompt_embeddings 
 
 
-                prompt_emb = self.mlp(prompt_emb)
+                    prompt_emb = self.mlp(prompt_emb)
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
@@ -740,31 +745,31 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 
+                if self.args.use_text:
+                    if self.Doc2Vec==False:
+                        if self.pool_type=="avg":                
+                            global_avg_pool = F.adaptive_avg_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_avg_pool.unsqueeze(-1)
+                        elif self.pool_type=="max":
+                            global_max_pool = F.adaptive_max_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_max_pool.unsqueeze(-1)
+                        elif self.pool_type=="min":
+                            global_min_pool = F.adaptive_max_pool1d(-1.0*prompt_emb.transpose(1, 2), 1).squeeze(2)
+                            prompt_emb=global_min_pool.unsqueeze(-1)
+                        elif self.pool_type == "attention":
 
-                if self.Doc2Vec==False:
-                    if self.pool_type=="avg":                
-                        global_avg_pool = F.adaptive_avg_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_avg_pool.unsqueeze(-1)
-                    elif self.pool_type=="max":
-                        global_max_pool = F.adaptive_max_pool1d(prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_max_pool.unsqueeze(-1)
-                    elif self.pool_type=="min":
-                        global_min_pool = F.adaptive_max_pool1d(-1.0*prompt_emb.transpose(1, 2), 1).squeeze(2)
-                        prompt_emb=global_min_pool.unsqueeze(-1)
-                    elif self.pool_type == "attention":
+                            outputs_reshaped = outputs#.transpose(1, 2)  
+                            outputs_norm = F.normalize(outputs_reshaped, p=2, dim=1)
+                            prompt_emb_norm = F.normalize(prompt_emb, p=2, dim=2)
+                            attention_scores = torch.bmm(prompt_emb_norm, outputs_norm) 
+                            attention_weights = F.softmax(attention_scores, dim=1)  
 
-                        outputs_reshaped = outputs#.transpose(1, 2)  
-                        outputs_norm = F.normalize(outputs_reshaped, p=2, dim=1)
-                        prompt_emb_norm = F.normalize(prompt_emb, p=2, dim=2)
-                        attention_scores = torch.bmm(prompt_emb_norm, outputs_norm) 
-                        attention_weights = F.softmax(attention_scores, dim=1)  
+                            weighted_prompt_emb = torch.sum(prompt_emb * attention_weights, dim=1)  
 
-                        weighted_prompt_emb = torch.sum(prompt_emb * attention_weights, dim=1)  
-
-                        prompt_emb = weighted_prompt_emb.unsqueeze(-1)  
-                #0523
-                else:
-                    prompt_emb=prompt_emb.unsqueeze(-1)
+                            prompt_emb = weighted_prompt_emb.unsqueeze(-1)  
+                    #0523
+                    else:
+                        prompt_emb=prompt_emb.unsqueeze(-1)
 
                 prompt_y = outputs
 

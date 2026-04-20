@@ -1,0 +1,66 @@
+digraph "Data Flow" {
+	compound=true fontname=SimHei rankdir=TB splines=ortho
+	node [fillcolor="#f9f9f9" fontname=SimHei shape=box style="rounded,filled"]
+	edge [fontname=SimHei fontsize=10]
+	subgraph cluster_frontend {
+		bgcolor="#e8f4f8" color=blue label="前端界面" style=dashed
+		{
+			rank=same
+			Render [label="更新预测折线图 &
+渲染注意力热力图"]
+			Poll [label="轮询任务状态"]
+			Input [label="用户输入:
+外部事件模拟文本"]
+		}
+	}
+	subgraph cluster_async {
+		bgcolor="#eef7ee" color=green label="异步队列与任务分配" style=dashed
+		API [label="API 网关
+(生成唯一任务ID)"]
+		Redis [label="Redis 消息队列"]
+		Worker [label="任务节点 (Worker)"]
+	}
+	subgraph cluster_data {
+		bgcolor="#fdf0f0" color=red label="基于时间窗口的上下文检索" style=dashed
+		DataCtrl [label="数据控制器
+(设定独立时间窗口)"]
+		DB [label="底层数据库
+(历史时序与文本)"]
+		LLM [label="LLM 接口
+(文本实时编码)"]
+		Features [label="异构特征拼接
+(长度为 L 的时序特征
+长度为 N 的文本特征)"]
+	}
+	subgraph cluster_inference {
+		bgcolor="#f4eef7" color=purple label="双引擎动态推理层" style=dashed
+		Router [label="路由判断
+(是否包含\"可视化\"标识)"]
+		Triton [label="Triton 自定义算子
+(高并发常规推理)"]
+		PyTorch [label="PyTorch 原生计算
+(提取 L x N 稠密注意力矩阵)"]
+		Result [label="持久化预测结果
+(包含数值序列与 JSON 权重)"]
+	}
+	Input -> API [label=" 发送模拟请求" weight=10]
+	API -> Redis [label=" 存入任务队列" weight=10]
+	API -> Input [label=" 返回受理状态" constraint=false style=dashed]
+	Redis -> Worker [label=" 提取任务" weight=10]
+	Worker -> LLM [label=" 调用接口"]
+	Worker -> DataCtrl [label=" 下发查询参数"]
+	DataCtrl -> DB [label=" 范围查询 (例如近60天时序)"]
+	DB -> DataCtrl [label=" 返回时序分块 (Patching)" constraint=false]
+	LLM -> Features [label=" 输出 N 个 Token"]
+	DataCtrl -> Features [label=" 输出 L 个 Patch"]
+	Features -> Router [label=" 输入多模态特征"]
+	Router -> Triton [label=" [常规请求]"]
+	Router -> PyTorch [label=" [可视化请求]"]
+	Triton -> Result
+	PyTorch -> Result
+	Result -> Worker [label=" 返回推断输出" constraint=false]
+	Worker -> DB [label=" 结果持久化并更新任务状态"]
+	Poll -> API [label=" 发起轮询"]
+	API -> DB [label=" 状态查询"]
+	DB -> Render [label=" 返回最终计算数据" constraint=false style=dashed]
+}

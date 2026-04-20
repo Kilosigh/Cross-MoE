@@ -1,0 +1,51 @@
+// Triton 内核调用栈
+digraph {
+	dpi=300
+	rankdir=TB size="10,12"
+	node [fontname="Microsoft YaHei" shape=box style="rounded,filled"]
+	edge [fontname="Microsoft YaHei"]
+	graph [fontname="Microsoft YaHei"]
+	subgraph cluster_pytorch {
+		color=blue label="PyTorch 模块与自动求导引擎 (Module & Autograd)" style=dashed
+		nn_module [label="FinalCrossMoEMultiHeadAttention.forward()
+(nn.Module)" fillcolor="#E4F0F8"]
+		autograd_fwd [label="FinalCrossMoEMultiHeadAttentionFunc.forward()" fillcolor="#E4F0F8"]
+		autograd_bwd [label="FinalCrossMoEMultiHeadAttentionFunc.backward()" fillcolor="#E4F0F8"]
+		nn_module -> autograd_fwd [label=" 前向传播"]
+		nn_module -> autograd_bwd [label=" 反向传播 (Autograd 引擎)" style=dashed]
+	}
+	subgraph cluster_forward {
+		color=black label="前向传播操作 (Forward Operations)" style=dotted
+		fwd_wrap_moe [label="triton_moe_project_mha_v4()
+(分别处理 Q 和 KV)" fillcolor="#FDF4EF"]
+		fwd_wrap_attn [label="batched_flash_decoding_mha_v3()" fillcolor="#FDF4EF"]
+		fwd_kernel_moe [label="@triton.jit
+batched_expert_project_kernel_v4" fillcolor="#ECFCCB"]
+		fwd_kernel_attn_p1 [label="@triton.jit
+batched_flash_decoding_mha_phase1_v3" fillcolor="#ECFCCB"]
+		fwd_kernel_attn_p2 [label="@triton.jit
+batched_flash_decoding_mha_phase2_v3" fillcolor="#ECFCCB"]
+		autograd_fwd -> fwd_wrap_moe [label=" 1. 路由与专家层投影"]
+		autograd_fwd -> fwd_wrap_attn [label=" 2. Flash Decoding 注意力计算"]
+		fwd_wrap_moe -> fwd_kernel_moe [label=" Grid: (M, B*H, max_blocks)"]
+		fwd_wrap_attn -> fwd_kernel_attn_p1 [label=" Grid: (max_q_blocks, num_splits, M*B*H)"]
+		fwd_wrap_attn -> fwd_kernel_attn_p2 [label=" Grid: (max_q_blocks, M*B*H)"]
+	}
+	subgraph cluster_backward {
+		color=black label="反向传播操作 (Backward Operations)" style=dotted
+		bwd_wrap_attn [label="triton_attention_backward_v4()" fillcolor="#FDF4EF"]
+		bwd_wrap_moe [label="triton_moe_project_backward_v4()
+(分别处理 dQ 和 dKV)" fillcolor="#FDF4EF"]
+		bwd_kernel_attn_dq [label="@triton.jit
+bwd_kernel_dq_mha_v4" fillcolor="#ECFCCB"]
+		bwd_kernel_attn_dkdv [label="@triton.jit
+bwd_kernel_dk_dv_mha_v4" fillcolor="#ECFCCB"]
+		bwd_kernel_moe [label="@triton.jit
+bwd_expert_project_kernel_v4" fillcolor="#ECFCCB"]
+		autograd_bwd -> bwd_wrap_attn [label=" 1. 注意力层梯度计算"]
+		autograd_bwd -> bwd_wrap_moe [label=" 2. 专家层投影梯度计算"]
+		bwd_wrap_attn -> bwd_kernel_attn_dq [label=" Grid: (M, B*H, q_blocks)"]
+		bwd_wrap_attn -> bwd_kernel_attn_dkdv [label=" Grid: (M, B*H, k_blocks)"]
+		bwd_wrap_moe -> bwd_kernel_moe [label=" Grid: (M, B*H)"]
+	}
+}

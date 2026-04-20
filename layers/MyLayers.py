@@ -205,7 +205,6 @@ class MixerLayer(nn.Module):
         aux_loss = 0
         if self.mix_type == 1:
             x, attention_weights = self.my_cross(ts, text, batch_idx)
-            
         
             if self.configs.plot_attn and self.configs.is_testing:
                 K = 20

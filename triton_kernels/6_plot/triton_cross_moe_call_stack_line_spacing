@@ -1,0 +1,41 @@
+// Triton Kernel Call Stack
+digraph {
+	dpi=300
+	rankdir=TB size="12,16"
+	node [fontname="Microsoft YaHei" shape=box style="rounded,filled"]
+	edge [fontname="Microsoft YaHei" fontsize=10]
+	subgraph cluster_pytorch {
+		color=blue fontname="Microsoft YaHei" label="PyTorch 模块与 Autograd 引擎" style=dashed
+		nn_module [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="8"><TR><TD>FinalCrossMoEMultiHeadAttention.forward()</TD></TR><TR><TD>(nn.Module)</TD></TR></TABLE>> fillcolor="#E4F0F8"]
+		autograd_fwd [label="FinalCrossMoEMultiHeadAttentionFunc.forward()" fillcolor="#E4F0F8"]
+		autograd_bwd [label="FinalCrossMoEMultiHeadAttentionFunc.backward()" fillcolor="#E4F0F8"]
+		nn_module -> autograd_fwd [label=" 前向传播 (Forward)"]
+		nn_module -> autograd_bwd [label=" 反向传播 (Backward)" style=dashed]
+	}
+	subgraph cluster_forward {
+		color=black fontname="Microsoft YaHei" label="前向计算链路 (Forward Operations)" style=dotted
+		fwd_wrap_moe [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="6"><TR><TD>triton_moe_project_mha()</TD></TR><TR><TD>(分别处理 Q 和 KV 的专家投影)</TD></TR></TABLE>> fillcolor="#FDF4EF"]
+		fwd_wrap_attn [label="batched_flash_decoding_mha()" fillcolor="#FDF4EF"]
+		fwd_kernel_moe [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4"><TR><TD>@triton.jit</TD></TR><TR><TD>batched_expert_project_kernel</TD></TR></TABLE>> fillcolor="#ECFCCB"]
+		fwd_kernel_attn_p1 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4"><TR><TD>@triton.jit</TD></TR><TR><TD>batched_flash_decoding_mha_phase1</TD></TR></TABLE>> fillcolor="#ECFCCB"]
+		fwd_kernel_attn_p2 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4"><TR><TD>@triton.jit</TD></TR><TR><TD>batched_flash_decoding_mha_phase2</TD></TR></TABLE>> fillcolor="#ECFCCB"]
+		autograd_fwd -> fwd_wrap_moe [label=" 1. 路由与专家投影"]
+		autograd_fwd -> fwd_wrap_attn [label=" 2. Flash Decoding 注意力计算"]
+		fwd_wrap_moe -> fwd_kernel_moe [label=" 线程网格: (M, B*H, max_blocks)"]
+		fwd_wrap_attn -> fwd_kernel_attn_p1 [label=" 线程网格: (max_q_blocks, num_splits, M*B*H)"]
+		fwd_wrap_attn -> fwd_kernel_attn_p2 [label=" 线程网格: (max_q_blocks, M*B*H)"]
+	}
+	subgraph cluster_backward {
+		color=black fontname="Microsoft YaHei" label="反向计算链路 (Backward Operations)" style=dotted
+		bwd_wrap_attn [label="triton_attention_backward()" fillcolor="#FDF4EF"]
+		bwd_wrap_moe [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="6"><TR><TD>triton_moe_project_backward()</TD></TR><TR><TD>(分别计算 dQ 和 dKV 的梯度)</TD></TR></TABLE>> fillcolor="#FDF4EF"]
+		bwd_kernel_attn_dq [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4"><TR><TD>@triton.jit</TD></TR><TR><TD>bwd_kernel_dq_mha</TD></TR></TABLE>> fillcolor="#ECFCCB"]
+		bwd_kernel_attn_dkdv [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4"><TR><TD>@triton.jit</TD></TR><TR><TD>bwd_kernel_dk_dv_mha</TD></TR></TABLE>> fillcolor="#ECFCCB"]
+		bwd_kernel_moe [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4"><TR><TD>@triton.jit</TD></TR><TR><TD>bwd_expert_project_kernel</TD></TR></TABLE>> fillcolor="#ECFCCB"]
+		autograd_bwd -> bwd_wrap_attn [label=" 1. 注意力反向传播 (Attention Grad)"]
+		autograd_bwd -> bwd_wrap_moe [label=" 2. 专家层反向传播 (MoE Grad)"]
+		bwd_wrap_attn -> bwd_kernel_attn_dq [label=" 线程网格: (M, B*H, q_blocks)"]
+		bwd_wrap_attn -> bwd_kernel_attn_dkdv [label=" 线程网格: (M, B*H, k_blocks)"]
+		bwd_wrap_moe -> bwd_kernel_moe [label=" 线程网格: (M, B*H)"]
+	}
+}
