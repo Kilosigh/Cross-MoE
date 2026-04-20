@@ -13,7 +13,7 @@ do
   # ./run_baseline.sh 6 6 0 $i 1
   # ./traditional_dataset/run_all_uni.sh 7 7 0 $((4*i))
   ./traditional_dataset/run_all_01_2.sh 2 2 0 $((4*i))
-done
+
 
 # BALANCE_LOSS_WEIGHTS=("0.0001" "0.001" "0.005"  "0.01"  "0.05" "0.1")
 

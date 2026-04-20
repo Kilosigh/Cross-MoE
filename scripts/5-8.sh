@@ -40,4 +40,5 @@ do
   # ./run_baseline.sh 6 6 0 $i 1
   # ./traditional_dataset/run_all_uni_2.sh 3 3 1 $((4*i))
   ./traditional_dataset/run_all_01_3.sh 3 3 1 $((4*i))
+
 done

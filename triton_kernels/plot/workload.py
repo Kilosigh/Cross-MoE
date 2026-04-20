@@ -60,6 +60,6 @@ plt.title('Performance Scaling with Sequence Length $N$', fontsize=15, pad=15)
 plt.tight_layout() # 自动调整子图参数，使之填充整个图像区域
 
 # ================= 7. 保存与显示 =================
-# plt.savefig('workload_scaling.pdf', format='pdf', b   box_inches='tight') # 保存为矢量图 PDF，最适合 LaTeX
+# plt.savefig('workload_scaling.pdf', format='pdf', bbox_inches='tight') # 保存为矢量图 PDF，最适合 LaTeX
 plt.savefig('workload_scaling.png', format='png', bbox_inches='tight', dpi=300)
 plt.show()
