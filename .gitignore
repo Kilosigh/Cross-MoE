@@ -17,5 +17,11 @@
 result*
 MoE_coeff
 *.pyc
-.sqlite
+*.sqlite
 uniform_init_router*
+Cross_MoE_script.py
+calculate_overhead.py
+data_pack.sh
+pack*
+test*
+top_words.py
