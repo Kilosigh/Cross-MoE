@@ -7,6 +7,7 @@ from exp.exp_long_term_forecasting_MoE import Exp_Long_Term_Forecast_MoE
 from exp.exp_imputation import Exp_Imputation
 from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
 from exp.exp_anomaly_detection import Exp_Anomaly_Detection
+from exp.exp_anomaly_detection_MoE import Exp_Anomaly_Detection_MoE
 from exp.exp_classification import Exp_Classification
 from utils.print_args import print_args
 import random
@@ -81,6 +82,8 @@ if __name__ == '__main__':
 
     # anomaly detection task
     parser.add_argument('--anomaly_ratio', type=float, default=0.25, help='prior anomaly ratio (%)')
+    parser.add_argument('--detect_mode', type=str, default='classify',
+                        help='anomaly detection mode: classify (SOTA) or reconstruct (baseline)')
 
     # model define
     parser.add_argument('--expand', type=int, default=2, help='expansion factor for Mamba')
@@ -297,7 +300,10 @@ if __name__ == '__main__':
     elif args.task_name == 'imputation':
         Exp = Exp_Imputation
     elif args.task_name == 'anomaly_detection':
-        Exp = Exp_Anomaly_Detection
+        if args.use_Cross_MoE or args.use_text:
+            Exp = Exp_Anomaly_Detection_MoE
+        else:
+            Exp = Exp_Anomaly_Detection
     elif args.task_name == 'classification':
         Exp = Exp_Classification
     else:
