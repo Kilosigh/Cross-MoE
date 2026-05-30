@@ -1,0 +1,10 @@
+name: MMT
+channels:
+  - defaults
+dependencies:
+  - gdown
+  - ipykernel
+  - ncurses
+  - numpy==1.26.4
+  - python==3.9.21
+prefix: /home/kilosigh/anaconda3/envs/MMT
