@@ -47,9 +47,9 @@ for MODEL in "${MODELS[@]}"; do
         --e_layers 2 \
         --d_layers 1 \
         --d_ff 256 \
-        --enc_in 49 \
-        --dec_in 49 \
-        --c_out 49 \
+        --enc_in 39 \
+        --dec_in 39 \
+        --c_out 39 \
         --batch_size 64 \
         --train_epochs 30 \
         --patience 5 \
@@ -83,9 +83,9 @@ for MODEL in "${MODELS[@]}"; do
         --e_layers 2 \
         --d_layers 1 \
         --d_ff 256 \
-        --enc_in 49 \
-        --dec_in 49 \
-        --c_out 49 \
+        --enc_in 39 \
+        --dec_in 39 \
+        --c_out 39 \
         --batch_size 64 \
         --train_epochs 30 \
         --patience 5 \
@@ -119,9 +119,9 @@ for MODEL in "${MODELS[@]}"; do
         --e_layers 2 \
         --d_layers 1 \
         --d_ff 256 \
-        --enc_in 49 \
-        --dec_in 49 \
-        --c_out 49 \
+        --enc_in 39 \
+        --dec_in 39 \
+        --c_out 39 \
         --batch_size 64 \
         --train_epochs 30 \
         --patience 5 \
