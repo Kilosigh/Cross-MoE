@@ -24,4 +24,5 @@ calculate_overhead.py
 data_pack.sh
 pack*
 test*
+!data/UNSW-NB15/test.csv
 top_words.py
