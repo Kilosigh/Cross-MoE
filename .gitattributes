@@ -1,3 +1,14 @@
+# 强行指定：所有文本文件在仓库中存为 LF，在 Windows 工作区也保持 LF（推荐，防止脚本报错）
+* text eol=lf
+
+# 或者是通用的跨平台做法（在 Windows 下拉取转为 CRLF，提交时转回 LF）：
+# * text=auto
+
 *.sqlite filter=lfs diff=lfs merge=lfs -text
 *.csv filter=lfs diff=lfs merge=lfs -text
 data/UNSW-NB15/** filter=lfs diff=lfs merge=lfs -text
+data/MSL/** filter=lfs diff=lfs merge=lfs -text
+data/PSM/** filter=lfs diff=lfs merge=lfs -text
+data/SMAP/** filter=lfs diff=lfs merge=lfs -text
+data/SMD/** filter=lfs diff=lfs merge=lfs -text
+data/SWaT/** filter=lfs diff=lfs merge=lfs -text

@@ -27,9 +27,10 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.configs = configs
         self.task_name = configs.task_name
-        self.text_len = 512
+        self.text_len = configs.text_len
         self.label_len = configs.label_len
         self.pred_len = configs.pred_len
+        self.seq_len = configs.seq_len
         self.device = configs.device
         self.d_model = configs.d_model
         self.batch_size = configs.batch_size
@@ -52,7 +53,7 @@ class Model(nn.Module):
         self.ts_model = model_dict[configs.model].Model(configs).float()
         self.enc_embedding = self.ts_model.enc_embedding
 
-        self.encoder = self.ts_model.encoder
+        self.encoder = getattr(self.ts_model, 'encoder', None)
 
         self.text_projector = None
         if configs.d_model != configs.llm_dim:
@@ -222,25 +223,37 @@ class Model(nn.Module):
             aux_loss_tx = 0
             scores_avg_saved = None
             B = ts_embedding.shape[0]
-            # 1. 检查是否使用可学习的嵌入向量替代文本
+            # 1. check for learnable text embedding
+            self._text_already_projected = False
             if self.use_learnable_text_emb:
-                # 获取当前的 batch size
                 text_embedding = self.learnable_text_embedding.expand(B, -1, -1)
-                # text_embedding = self.learnable_text_embedding
-                tokens = None 
+                tokens = None
                 all_special_tokens = self.stage_1_model.tokenizer.all_special_tokens
-                
+
+            # 2. pre-computed tensor embedding (anomaly_detection: BERT [CLS] → project → repeat)
+            elif isinstance(text, torch.Tensor) and text.dim() == 2:
+                # text: [B, bert_dim] → project to [B, d_model] → [B, text_len, d_model]
+                if self.text_projector is not None:
+                    text_emb = self.text_projector(text)  # [B, d_model]
+                else:
+                    text_emb = text[:, :self.d_model]
+                text_embedding = text_emb.unsqueeze(1).expand(-1, self.text_len, -1)
+                tokens = None
+                all_special_tokens = []
+                # Already projected → skip the second text_projector below
+                self._text_already_projected = True
+
             else:
-                # 2. 原有的文本分词与编码逻辑
+                # 3. raw text strings → tokenize + BERT (forecasting path)
                 text = [f"<|start_prompt|Make predictions about the future based on the following information: {text_info}<|<end_prompt>|>" for text_info in text]
                 token = self.stage_1_model.tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
                 tokens = self.stage_1_model.tokenizer.convert_ids_to_tokens(token['input_ids'][0])
-                # (batch, token, dim)
                 text_embedding = self.stage_1_model.text_encoder(**token.to(self.device)).last_hidden_state
                 all_special_tokens = self.stage_1_model.tokenizer.all_special_tokens
             
 
-            if self.text_projector is not None and not  self.use_learnable_text_emb:
+            if self.text_projector is not None and not self.use_learnable_text_emb \
+               and not getattr(self, '_text_already_projected', False):
                 text_embedding = self.text_projector(text_embedding)
                 print(text_embedding.shape)
 
@@ -392,9 +405,58 @@ class Model(nn.Module):
         }
         return ret_dict
 
+    def anomaly_detection(self, x_enc, text, batch_idx=-1):
+        """Reconstruct input with optional MoE-Attn text fusion.
+
+        Uses the base TS model's anomaly_detection pipeline for encoding.
+        For TimesNet: enc_embedding → TimesBlocks → head
+        For PatchTST: enc_embedding → encoder → flatten_head
+        Text is fused by the mixer (if available) after TS encoding.
+        """
+        # De-stationary normalization (same as base model)
+        means = x_enc.mean(1, keepdim=True).detach()
+        x_enc = x_enc - means
+        stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
+        x_enc /= stdev
+
+        L = x_enc.shape[1]
+
+        # Encode TS using the base model's pipeline
+        enc_out = self.enc_embedding(x_enc, None)  # [B, L, C] → [B, L, d_model] or [B, N, d_model]
+
+        # Run base model's encoder-equivalent (works for TimesNet/PatchTST)
+        if hasattr(self, 'encoder') and self.encoder is not None:
+            enc_out, _ = self.encoder(enc_out)
+        elif hasattr(self.ts_model, 'model') and hasattr(self.ts_model, 'layer'):
+            # TimesNet anomaly_detection path: TimesBlock loop
+            for i in range(self.ts_model.layer):
+                enc_out = self.ts_model.layer_norm(self.ts_model.model[i](enc_out))
+
+        aux_loss = 0.0
+
+        # Text encoding + MoE-Attn fusion (if text provided and mixer exists)
+        if text is not None:
+            ret_dict = self.text_encoder(text, enc_out)
+            text_emb = ret_dict["text_embedding"]
+            aux_loss += ret_dict.get("aux_loss_tx", 0)
+            enc_out, aux_loss_mix = self.mixer(enc_out, text_emb, batch_idx)
+            aux_loss += aux_loss_mix
+
+        # Reconstruct via base model's head
+        dec_out = self.ts_model.head(enc_out)
+
+        # De-normalize
+        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, L, 1))
+        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, L, 1))
+
+        return dec_out, aux_loss
+
     def forward(self, inputs, batch_idx = -1):
         x_enc, x_mark_enc, x_dec, x_mark_dec, text = inputs
         if self.task_name == 'long_term_forecast':
             ret_dict = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec, text, batch_idx)
-            return ret_dict  # [B, L, D]
+            return ret_dict
+        if self.task_name == 'anomaly_detection':
+            dec_out, aux_loss = self.anomaly_detection(x_enc, text, batch_idx)
+            return {"outputs": dec_out, "aux_loss": aux_loss}
         return None

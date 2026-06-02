@@ -467,7 +467,7 @@ class MoEClusteredAttention(nn.Module):
 
         expert_hidden_dim = d_model
 
-        self.H = 6
+        self.H = num_heads
         d_model_head = d_model // self.H 
         # ----------------------------
         # Router (miu) 参数

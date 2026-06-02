@@ -26,3 +26,5 @@ pack*
 test*
 !data/UNSW-NB15/test.csv
 top_words.py
+.claude/
+data/.text_cache/

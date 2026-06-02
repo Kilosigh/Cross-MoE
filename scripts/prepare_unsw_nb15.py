@@ -87,9 +87,13 @@ def preprocess(df_train, df_test):
     tr_idx, te_idx = train_test_split(indices, test_size=0.2, random_state=42, stratify=y)
     tr_idx, va_idx = train_test_split(tr_idx, test_size=0.125, random_state=42, stratify=y[tr_idx])
 
-    # --- 5. Generate BERT text embeddings ---
-    texts = [ATTACK_DESCRIPTIONS.get(a, f"Network traffic: {a}") for a in attacks]
-    text_embeddings = encode_texts(texts)
+    # --- 5. Generate BERT text embeddings (compact: one per unique attack type) ---
+    unique_attacks = sorted(set(attacks))
+    print(f"Unique attack types: {unique_attacks}")
+    unique_texts = [ATTACK_DESCRIPTIONS.get(a, f"Network traffic: {a}") for a in unique_attacks]
+    text_emb_table = encode_texts(unique_texts)  # [N_types, 768]
+    attack_to_idx = {a: i for i, a in enumerate(unique_attacks)}
+    text_idx_per_sample = np.array([attack_to_idx[a] for a in attacks])
 
     # --- 6. Save ---
     feature_names = [f"f{i}" for i in range(X.shape[1])]
@@ -97,10 +101,16 @@ def preprocess(df_train, df_test):
         df = pd.DataFrame(X[idx], columns=feature_names)
         df["label"] = y[idx]
         df["attack_type"] = attacks[idx]
-        df["text_idx"] = idx  # maps back to text_emb.pt row
+        df["text_idx"] = text_idx_per_sample[idx]
         path = os.path.join(DATA_DIR, f"{name}.csv")
         df.to_csv(path, index=False)
         print(f"  {name}: {len(df)} samples, attack ratio: {df['label'].mean():.3f}")
+
+    # Save test labels separately (Time-Series-Library format)
+    test_labels = y[te_idx]
+    label_df = pd.DataFrame({'index': range(len(test_labels)), 'label': test_labels})
+    label_df.to_csv(os.path.join(DATA_DIR, "test_label.csv"), index=False)
+    print(f"  test_label: {len(label_df)} rows")
 
     print(f"\nFeatures: {X.shape[1]}, Total: {len(X)} samples")
     print(f"Data saved to {DATA_DIR}/")

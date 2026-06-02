@@ -123,9 +123,12 @@ class Model(nn.Module):
         x_enc /= stdev
 
         # do patching and embedding
+        n_vars = x_enc.shape[1]
         x_enc = x_enc.permute(0, 2, 1)
         # u: [bs * nvars x patch_num x d_model]
-        enc_out, n_vars = self.enc_embedding(x_enc)
+        enc_out = self.enc_embedding(x_enc)
+        if isinstance(enc_out, (list, tuple)):
+            enc_out = enc_out[0]
 
         # Encoder
         # z: [bs * nvars x patch_num x d_model]
@@ -156,9 +159,12 @@ class Model(nn.Module):
         x_enc /= stdev
 
         # do patching and embedding
+        n_vars = x_enc.shape[1]
         x_enc = x_enc.permute(0, 2, 1)
         # u: [bs * nvars x patch_num x d_model]
-        enc_out, n_vars = self.enc_embedding(x_enc)
+        enc_out = self.enc_embedding(x_enc)
+        if isinstance(enc_out, (list, tuple)):
+            enc_out = enc_out[0]
 
         # Encoder
         # z: [bs * nvars x patch_num x d_model]
@@ -189,9 +195,12 @@ class Model(nn.Module):
         x_enc /= stdev
 
         # do patching and embedding
+        n_vars = x_enc.shape[1]
         x_enc = x_enc.permute(0, 2, 1)
         # u: [bs * nvars x patch_num x d_model]
-        enc_out, n_vars = self.enc_embedding(x_enc)
+        enc_out = self.enc_embedding(x_enc)
+        if isinstance(enc_out, (list, tuple)):
+            enc_out = enc_out[0]
 
         # Encoder
         # z: [bs * nvars x patch_num x d_model]

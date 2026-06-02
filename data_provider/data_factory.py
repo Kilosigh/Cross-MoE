@@ -1,6 +1,6 @@
 from data_provider.data_loader import Dataset_Custom, Dataset_Custom_uni_modal, Dataset_M4, PSMSegLoader, \
     MSLSegLoader, SMAPSegLoader, SMDSegLoader, SWATSegLoader
-from data_provider.netsec_loader import UNSWNB15SegLoader, EdgeIIoTSegLoader
+from data_provider.netsec_loader import UNSWNB15Loader
 from data_provider.uea import collate_fn
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -15,8 +15,7 @@ data_dict = {
     'SMAP': SMAPSegLoader,
     'SMD': SMDSegLoader,
     'SWAT': SWATSegLoader,
-    'UNSWNB15': UNSWNB15SegLoader,
-    'EdgeIIoT': EdgeIIoTSegLoader,
+    'UNSWNB15': UNSWNB15Loader,
 }
 
 

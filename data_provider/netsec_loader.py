@@ -1,9 +1,9 @@
 """
-Network security anomaly detection dataloaders with text modality support.
+UNSW-NB15 anomaly detection dataloader — follows Time-Series-Library format.
 
-Supports:
-  - UNSWNB15: UNSW-NB15 dataset with BERT-encoded text descriptions
-  - EdgeIIoT: Edge-IIoTset dataset (to be added)
+- Unimodal:  returns (batch_x [win_size, n_ts_features], batch_y)
+- Multimodal: returns (batch_x [win_size, n_ts_features + n_text_features], batch_y)
+  where text features are PCA-projected BERT embeddings replicated across time.
 """
 import os
 import numpy as np
@@ -11,121 +11,86 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
 
-class NetSecSegLoader(Dataset):
+N_TEXT_DIM = 8  # PCA target dimension for text features
+
+
+class UNSWNB15Loader(Dataset):
     """
-    Generic network security time-series dataloader with text and classification support.
-
-    Data directory structure:
-      data/{dataset_name}/
-        train.csv       - training data (features + label + attack_type + text_idx)
-        test.csv        - test data
-        text_emb.pt     - pre-computed BERT text embeddings
-
-    Returns per sample:
-      seq_x: [win_size, n_features]  - time series window
-      label: int (0=normal, 1=attack) - binary classification label
-      text_emb: [1, bert_dim]         - pre-computed BERT embedding for this sample's text
+    args.use_text:  0 = unimodal (TS only)
+                    1 = multimodal (TS + PCA text channels)
     """
-
     def __init__(self, args, root_path, win_size, step=1, flag="train"):
         self.flag = flag
         self.step = step
         self.win_size = win_size
-        self.args = args
+        self.use_text = getattr(args, 'use_text', 0)
 
-        # Load data
-        data_path = os.path.join(root_path, f'{flag}.csv')
-        if not os.path.exists(data_path):
-            # Try alternative: train/val split from train.csv
-            if flag == 'val':
-                data_path = os.path.join(root_path, 'train.csv')
-                self._is_val_split = True
-            else:
-                raise FileNotFoundError(f"Data file not found: {data_path}")
-        else:
-            self._is_val_split = False
+        # --- load data ---
+        train_df = pd.read_csv(os.path.join(root_path, "train.csv"))
+        test_df  = pd.read_csv(os.path.join(root_path, "test.csv"))
+        label_df = pd.read_csv(os.path.join(root_path, "test_label.csv"))
 
-        df = pd.read_csv(data_path)
+        # TS feature columns
+        feat_cols = [c for c in train_df.columns if c.startswith('f')]
 
-        # Separate features, labels, and text indices
-        feature_cols = [c for c in df.columns if c.startswith('f')]
-        if not feature_cols:
-            # Auto-detect numerical columns
-            feature_cols = []
-            for c in df.columns:
-                if c not in ['label', 'attack_type', 'text_idx']:
-                    try:
-                        pd.to_numeric(df[c].iloc[0])
-                        feature_cols.append(c)
-                    except:
-                        pass
-
-        self.features = df[feature_cols].values.astype(np.float32)
-        self.labels = df['label'].values.astype(np.int64)
-        self.text_indices = df['text_idx'].values.astype(np.int64) if 'text_idx' in df.columns else None
-
-        # Load pre-computed text embeddings
-        text_emb_path = os.path.join(root_path, 'text_emb.pt')
-        if os.path.exists(text_emb_path):
-            self.text_embeddings = torch.load(text_emb_path, weights_only=True)
-        else:
-            self.text_embeddings = None
-
-        # Scale features
         self.scaler = StandardScaler()
-        self.features = self.scaler.fit_transform(self.features)
+        train_ts = np.nan_to_num(train_df[feat_cols].values.astype(np.float32))
+        self.scaler.fit(train_ts)
+        self.train_ts = self.scaler.transform(train_ts)
 
-        # Handle NaN
-        self.features = np.nan_to_num(self.features, nan=0.0)
+        test_ts = np.nan_to_num(test_df[feat_cols].values.astype(np.float32))
+        self.test_ts = self.scaler.transform(test_ts)
+        self.test_labels = label_df.values[:, 1:].astype(int)  # skip index col
 
-        # Val split: take last 20% of training data
-        if self._is_val_split:
-            n_val = int(len(self.features) * 0.2)
-            self.features = self.features[-n_val:]
-            self.labels = self.labels[-n_val:]
-            if self.text_indices is not None:
-                self.text_indices = self.text_indices[-n_val:]
+        # --- text features (optional) ---
+        if self.use_text:
+            text_emb = torch.load(os.path.join(root_path, "text_emb.pt"), weights_only=False)
+            # text_emb: [N_types, 768] → PCA → [N_types, N_TEXT_DIM]
+            text_np = text_emb.numpy()
 
-        print(f"{flag}: {len(self.features)} samples, "
-              f"attack ratio: {self.labels.mean():.3f}")
+            # Fit PCA on training attack-type distribution
+            self.text_pca = PCA(n_components=N_TEXT_DIM, random_state=42)
+            text_pca = self.text_pca.fit_transform(text_np)  # [N_types, 8]
+
+            # Map each sample to its text embedding
+            train_text_idx = train_df['text_idx'].values.astype(int)
+            test_text_idx  = test_df['text_idx'].values.astype(int)
+            train_text_np = text_pca[train_text_idx]  # [N_train, 8]
+            test_text_np  = text_pca[test_text_idx]    # [N_test, 8]
+
+            # Concatenate TS + text features
+            self.train_data = np.concatenate([self.train_ts, train_text_np], axis=1)
+            self.test_data  = np.concatenate([self.test_ts,  test_text_np],  axis=1)
+        else:
+            self.train_data = self.train_ts
+            self.test_data  = self.test_ts
+
+        # Val split: last 20% of train
+        n_val = int(len(self.train_data) * 0.2)
+        self.val_data = self.train_data[-n_val:]
+        self.train_data = self.train_data[:-n_val]
+
+        print(f"{flag}: train {self.train_data.shape}, val {self.val_data.shape}, "
+              f"test {self.test_data.shape}, text={'Y' if self.use_text else 'N'}")
+
+    def _select(self):
+        if self.flag == "train":
+            return self.train_data, np.zeros((len(self.train_data), 1))
+        elif self.flag == "val":
+            return self.val_data, np.zeros((len(self.val_data), 1))
+        else:
+            return self.test_data, self.test_labels
 
     def __len__(self):
-        return (len(self.features) - self.win_size) // self.step + 1
+        data, _ = self._select()
+        return (len(data) - self.win_size) // self.step + 1
 
     def __getitem__(self, index):
+        data, labels = self._select()
         idx = index * self.step
-
-        # Time series window
-        seq_x = torch.from_numpy(self.features[idx:idx + self.win_size])
-
-        # Label: use the label of the last time step in the window
-        # (or majority vote for the window)
-        window_labels = self.labels[idx:idx + self.win_size]
-        label = int(np.median(window_labels))  # use median to handle edge cases
-
-        # Text embedding
-        if self.text_embeddings is not None and self.text_indices is not None:
-            text_idx = self.text_indices[idx + self.win_size - 1]  # text for last timestep
-            text_emb = self.text_embeddings[text_idx].squeeze(0)   # [bert_dim]
-        else:
-            text_emb = torch.zeros(768)  # BERT-base dim fallback
-
-        return seq_x, label, text_emb
-
-
-class UNSWNB15SegLoader(NetSecSegLoader):
-    """UNSW-NB15 specific loader."""
-    def __init__(self, args, root_path, win_size, step=1, flag="train"):
-        if not os.path.exists(root_path):
-            os.makedirs(root_path, exist_ok=True)
-        super().__init__(args, root_path, win_size, step, flag)
-
-
-class EdgeIIoTSegLoader(NetSecSegLoader):
-    """Edge-IIoTset specific loader (placeholder)."""
-    def __init__(self, args, root_path, win_size, step=1, flag="train"):
-        if not os.path.exists(root_path):
-            os.makedirs(root_path, exist_ok=True)
-        super().__init__(args, root_path, win_size, step, flag)
+        x = data[idx:idx + self.win_size]
+        y = labels[idx:idx + self.win_size]
+        return torch.from_numpy(x).float(), torch.from_numpy(y).float()
