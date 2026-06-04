@@ -421,11 +421,16 @@ class PSMSegLoader(Dataset):
         data = pd.read_csv(os.path.join(root_path, 'train.csv'))
         data = data.values[:, 1:]
         data = np.nan_to_num(data)
+        # Slice to enc_in columns (strip trailing text-embedding channels for MoE-Attn)
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < data.shape[1]:
+            data = data[:, :args.enc_in]
         self.scaler.fit(data)
         data = self.scaler.transform(data)
         test_data = pd.read_csv(os.path.join(root_path, 'test.csv'))
         test_data = test_data.values[:, 1:]
         test_data = np.nan_to_num(test_data)
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < test_data.shape[1]:
+            test_data = test_data[:, :args.enc_in]
         self.test = self.scaler.transform(test_data)
         self.train = data
         data_len = len(self.train)
@@ -466,9 +471,14 @@ class MSLSegLoader(Dataset):
         self.win_size = win_size
         self.scaler = StandardScaler()
         data = np.load(os.path.join(root_path, "MSL_train.npy"))
+        # Slice to enc_in columns (strip trailing text-embedding channels for MoE-Attn)
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < data.shape[1]:
+            data = data[:, :args.enc_in]
         self.scaler.fit(data)
         data = self.scaler.transform(data)
         test_data = np.load(os.path.join(root_path, "MSL_test.npy"))
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < test_data.shape[1]:
+            test_data = test_data[:, :args.enc_in]
         self.test = self.scaler.transform(test_data)
         self.train = data
         data_len = len(self.train)
@@ -509,9 +519,14 @@ class SMAPSegLoader(Dataset):
         self.win_size = win_size
         self.scaler = StandardScaler()
         data = np.load(os.path.join(root_path, "SMAP_train.npy"))
+        # Slice to enc_in columns (strip trailing text-embedding channels for MoE-Attn)
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < data.shape[1]:
+            data = data[:, :args.enc_in]
         self.scaler.fit(data)
         data = self.scaler.transform(data)
         test_data = np.load(os.path.join(root_path, "SMAP_test.npy"))
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < test_data.shape[1]:
+            test_data = test_data[:, :args.enc_in]
         self.test = self.scaler.transform(test_data)
         self.train = data
         data_len = len(self.train)
@@ -553,9 +568,14 @@ class SMDSegLoader(Dataset):
         self.win_size = win_size
         self.scaler = StandardScaler()
         data = np.load(os.path.join(root_path, "SMD_train.npy"))
+        # Slice to enc_in columns (strip trailing text-embedding channels for MoE-Attn)
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < data.shape[1]:
+            data = data[:, :args.enc_in]
         self.scaler.fit(data)
         data = self.scaler.transform(data)
         test_data = np.load(os.path.join(root_path, "SMD_test.npy"))
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < test_data.shape[1]:
+            test_data = test_data[:, :args.enc_in]
         self.test = self.scaler.transform(test_data)
         self.train = data
         data_len = len(self.train)
@@ -599,6 +619,10 @@ class SWATSegLoader(Dataset):
         labels = test_data.values[:, -1:]
         train_data = train_data.values[:, :-1]
         test_data = test_data.values[:, :-1]
+        # Slice to enc_in columns (strip trailing text-embedding channels for MoE-Attn)
+        if hasattr(args, 'enc_in') and args.enc_in and args.enc_in < train_data.shape[1]:
+            train_data = train_data[:, :args.enc_in]
+            test_data = test_data[:, :args.enc_in]
 
         self.scaler.fit(train_data)
         train_data = self.scaler.transform(train_data)

@@ -300,10 +300,7 @@ if __name__ == '__main__':
     elif args.task_name == 'imputation':
         Exp = Exp_Imputation
     elif args.task_name == 'anomaly_detection':
-        if args.use_text:
-            Exp = Exp_Anomaly_Detection_MoE
-        else:
-            Exp = Exp_Anomaly_Detection
+        Exp = Exp_Anomaly_Detection_MoE
     elif args.task_name == 'classification':
         Exp = Exp_Classification
     else:

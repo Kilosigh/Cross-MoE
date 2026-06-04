@@ -42,7 +42,7 @@ class Model(nn.Module):
         self.seq_len = configs.seq_len
         self.pred_len = configs.pred_len
         padding = stride
-        if patch_len>configs.pred_len:
+        if self.task_name != 'anomaly_detection' and patch_len>configs.pred_len:
             patch_len = configs.pred_len
         # patching and embedding
         self.enc_embedding = PatchEmbedding(
@@ -123,9 +123,8 @@ class Model(nn.Module):
         x_enc /= stdev
 
         # do patching and embedding
-        n_vars = x_enc.shape[1]
-        x_enc = x_enc.permute(0, 2, 1)
-        # u: [bs * nvars x patch_num x d_model]
+        n_vars = x_enc.shape[2]
+        # PatchEmbedding does its own internal permute; feed [B, L, C] directly
         enc_out = self.enc_embedding(x_enc)
         if isinstance(enc_out, (list, tuple)):
             enc_out = enc_out[0]
@@ -159,9 +158,8 @@ class Model(nn.Module):
         x_enc /= stdev
 
         # do patching and embedding
-        n_vars = x_enc.shape[1]
-        x_enc = x_enc.permute(0, 2, 1)
-        # u: [bs * nvars x patch_num x d_model]
+        n_vars = x_enc.shape[2]
+        # PatchEmbedding does its own internal permute; feed [B, L, C] directly
         enc_out = self.enc_embedding(x_enc)
         if isinstance(enc_out, (list, tuple)):
             enc_out = enc_out[0]
@@ -195,9 +193,8 @@ class Model(nn.Module):
         x_enc /= stdev
 
         # do patching and embedding
-        n_vars = x_enc.shape[1]
-        x_enc = x_enc.permute(0, 2, 1)
-        # u: [bs * nvars x patch_num x d_model]
+        n_vars = x_enc.shape[2]
+        # PatchEmbedding does its own internal permute; feed [B, L, C] directly
         enc_out = self.enc_embedding(x_enc)
         if isinstance(enc_out, (list, tuple)):
             enc_out = enc_out[0]

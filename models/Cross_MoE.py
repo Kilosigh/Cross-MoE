@@ -36,7 +36,7 @@ class Model(nn.Module):
         self.batch_size = configs.batch_size
         self.use_learnable_text_emb = configs.use_learnable_text_emb
 
-        if configs.patch_len > configs.pred_len:
+        if configs.task_name != 'anomaly_detection' and configs.patch_len > configs.pred_len:
             configs.patch_len = configs.pred_len
             configs.stride = configs.patch_len // 2
 
@@ -420,9 +420,10 @@ class Model(nn.Module):
         x_enc /= stdev
 
         L = x_enc.shape[1]
+        n_vars = x_enc.shape[2]
 
         # Encode TS using the base model's pipeline
-        enc_out = self.enc_embedding(x_enc, None)  # [B, L, C] → [B, L, d_model] or [B, N, d_model]
+        enc_out = self.enc_embedding(x_enc, None)  # [B, L, C] → [B, L, d_model] or [B*C, patch_num, d_model]
 
         # Run base model's encoder-equivalent (works for TimesNet/PatchTST)
         if hasattr(self, 'encoder') and self.encoder is not None:
@@ -436,14 +437,30 @@ class Model(nn.Module):
 
         # Text encoding + MoE-Attn fusion (if text provided and mixer exists)
         if text is not None:
+            # For patch-based models: reshape [B*n_vars, P, D] → [B, n_vars*P, D] for mixer
+            if self.model_name in ("PatchTST", "TimeXer"):
+                enc_out = torch.reshape(
+                    enc_out, (-1, n_vars, enc_out.shape[-2], enc_out.shape[-1]))
+                enc_out = enc_out.reshape(enc_out.shape[0], -1, enc_out.shape[-1])
+
             ret_dict = self.text_encoder(text, enc_out)
             text_emb = ret_dict["text_embedding"]
             aux_loss += ret_dict.get("aux_loss_tx", 0)
             enc_out, aux_loss_mix = self.mixer(enc_out, text_emb, batch_idx)
             aux_loss += aux_loss_mix
 
+            # Reshape back for patch-based models: [B, n_vars*P, D] → [B, n_vars, D, P]
+            if self.model_name in ("PatchTST", "TimeXer"):
+                B = enc_out.shape[0]
+                enc_out = enc_out.reshape(B, n_vars, -1, enc_out.shape[-1])
+                enc_out = enc_out.permute(0, 1, 3, 2)  # [B, n_vars, D, P]
+
         # Reconstruct via base model's head
         dec_out = self.ts_model.head(enc_out)
+
+        # TimesNet head: [B, L, enc_in]; PatchTST head: [B, n_vars, L] → [B, L, n_vars]
+        if self.model_name in ("PatchTST", "TimeXer"):
+            dec_out = dec_out.permute(0, 2, 1)
 
         # De-normalize
         dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, L, 1))

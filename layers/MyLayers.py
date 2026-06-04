@@ -196,6 +196,23 @@ class MixerLayer(nn.Module):
             init_text = configs.cluster_init_text_data
             self.moe_enhanced_cross = MoEClusteredAttention(configs, configs.d_model, configs.num_tx_experts, 0.01,
                                                              init_text, use_trainable_center = configs.use_trainable_center)
+            # Native cross-attn fallback for short text sequences
+            # (e.g. anomaly detection with text_len=4):
+            #   MoE clustering overhead (~61M FLOPs) >> native attn (~6.5M FLOPs)
+            self.my_cross = MyCrossAttentionLayer(
+                AttentionLayer(
+                    FullAttention(False, configs.factor, attention_dropout=configs.dropout,
+                                  output_attention=configs.plot_attn),
+                    configs.d_model, configs.n_heads),
+                AttentionLayer(
+                    FullAttention(False, configs.factor, attention_dropout=configs.dropout,
+                                  output_attention=configs.plot_attn),
+                    configs.d_model, configs.n_heads),
+                configs.d_model,
+                configs.d_ff,
+                dropout=configs.dropout,
+                activation=configs.activation,
+            )
     
     def plot_t_SNE(self):
         assert(self.mix_type == 2)
@@ -271,8 +288,13 @@ class MixerLayer(nn.Module):
             # print(ts.shape)
             # print(text.shape)
             x = ts + text
-        else:
-            x, aux_loss= self.moe_enhanced_cross(ts,text,text, batch_idx)
+        else:   # mix_type == 2 (MoE-Enhanced Attn)
+            # Short text → MoE clustering overhead dwarfs attention savings;
+            # fall back to native cross-attention (10x fewer FLOPs for text_len<=16).
+            if text.shape[1] <= 16:
+                x, _ = self.my_cross(ts, text, batch_idx)
+            else:
+                x, aux_loss = self.moe_enhanced_cross(ts, text, text, batch_idx)
         # x = self.self(ts, x)
         
         return x, aux_loss

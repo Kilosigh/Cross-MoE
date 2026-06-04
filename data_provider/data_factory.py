@@ -15,6 +15,7 @@ data_dict = {
     'SMAP': SMAPSegLoader,
     'SMD': SMDSegLoader,
     'SWAT': SWATSegLoader,
+    'SWaT': SWATSegLoader,
     'UNSWNB15': UNSWNB15Loader,
 }
 
